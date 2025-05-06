@@ -1,4 +1,5 @@
 const express = require('express');
+const cors = require('cors');
 const connectDB = require('./config/database');
 const orderRoutes = require('./routes/orders');
 const managerRoutes = require('./routes/managers');
@@ -19,6 +20,13 @@ connectDB();
 
 // Middleware pour parser les requêtes JSON
 app.use(express.json());
+
+// Middleware CORS
+app.use(cors({
+  origin: 'https://ae417c9-f052-4ba1-8-spock.replit.dev',
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
 
 // Middleware de débogage
 app.use((req, res, next) => {
