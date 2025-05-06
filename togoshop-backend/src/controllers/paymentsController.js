@@ -1,7 +1,7 @@
 const Payment = require('../models/Payment');
 const Order = require('../models/Order');
 const Wallet = require('../models/Wallet');
-const { processExternalPayment } = require('../services/payment');
+const { processExternalPayment } = require('../services/paymentGateway');
 const { sendNotification } = require('../services/notifications');
 
 // Méthodes de paiement autorisées

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const productsController = require('../controllers/productsController');
-const auth = require('../middleware/auth'); // Changé de authMiddleware à auth
+const auth = require('../middleware/auth');
 
 // Route pour ajouter un nouveau produit (nécessite authentification)
 router.post('/', auth, productsController.createProduct);
@@ -11,6 +11,9 @@ router.get('/supermarket/:supermarketId', productsController.getProductsBySuperm
 
 // Route pour récupérer un produit par ID (publique)
 router.get('/:id', productsController.getProductById);
+
+// Route pour récupérer les substituts d’un produit (publique)
+router.get('/substitutes/:category/:supermarketId/:locationId', productsController.getSubstitutes);
 
 // Route pour mettre à jour un produit (nécessite authentification)
 router.put('/:id', auth, productsController.updateProduct);

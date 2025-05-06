@@ -2,14 +2,23 @@ const express = require('express');
 const router = express.Router();
 const ordersController = require('../controllers/ordersController');
 const auth = require('../middleware/auth');
-const mongoose = require('mongoose'); // Ajout pour utiliser ObjectId
-const Product = require('../models/Product'); // Assure-toi d'importer le modèle Product
+const mongoose = require('mongoose');
+const Product = require('../models/Product');
 
 // Créer une nouvelle commande
 router.post('/', auth, ordersController.createOrder);
 
 // Lister les commandes en attente pour un supermarché
 router.get('/supermarket/:supermarketId/pending', auth, ordersController.getPendingOrders);
+
+// Récupérer le panier de l'utilisateur
+router.get('/user/cart', auth, ordersController.getUserCart);
+
+// Récupérer une commande spécifique
+router.get('/:id', auth, ordersController.getOrderById);
+
+// Mettre à jour une commande
+router.put('/:id', auth, ordersController.updateOrder);
 
 // Mettre à jour le statut d'une commande
 router.put('/:id/status', auth, ordersController.updateOrderStatus);

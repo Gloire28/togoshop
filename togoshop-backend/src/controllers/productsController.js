@@ -17,12 +17,12 @@ exports.createProduct = async (req, res) => {
       return res.status(400).json({ message: 'Nom, prix, catégorie, supermarché et stock par site sont requis' });
     }
 
-    // Ajout de la validation pour price
+    // Validation pour price
     if (price < 0) {
       return res.status(400).json({ message: 'Le prix du produit ne peut pas être négatif' });
     }
 
-    // Ajout de la validation pour weight
+    // Validation pour weight
     if (weight !== undefined && (typeof weight !== 'number' || weight <= 0)) {
       return res.status(400).json({ message: 'Le poids doit être un nombre positif' });
     }
@@ -33,9 +33,7 @@ exports.createProduct = async (req, res) => {
       return res.status(404).json({ message: 'Supermarché non trouvé' });
     }
 
-    // Convertir le document Mongoose en objet JavaScript pur
     const supermarketObj = supermarket.toObject();
-    console.log('Supermarché chargé:', JSON.stringify(supermarketObj, null, 2));
 
     // Valider le stock par site
     for (const stock of stockByLocation) {
@@ -43,44 +41,25 @@ exports.createProduct = async (req, res) => {
         return res.status(400).json({ message: 'Format de stock invalide : locationId et stock (nombre positif) requis' });
       }
 
-      // Vérifier que le locationId existe dans le supermarché (soit dans sites, soit dans locations)
       let locationExists = false;
-
-      // Vérifier dans sites
-      const sites = supermarketObj.sites || [];
-      console.log('Sites bruts:', sites);
-      const sitesExist = sites.some(loc => {
-        try {
-          const locId = loc._id instanceof mongoose.Types.ObjectId ? loc._id.toString() : loc._id.toString();
-          const match = locId === stock.locationId;
-          console.log(`Comparaison site _id: ${locId} avec locationId: ${stock.locationId}, Résultat: ${match}`);
-          return match;
-        } catch (error) {
-          console.error(`Erreur lors de la comparaison dans sites pour loc: ${JSON.stringify(loc)}`, error);
-          return false;
-        }
-      });
-      locationExists = locationExists || sitesExist;
-      console.log(`Sites vérifiés: ${sitesExist}`);
-
-      // Vérifier dans locations
       const locations = supermarketObj.locations || [];
-      console.log('Locations bruts:', locations);
-      const locationsExist = locations.some(loc => {
+      const sites = supermarketObj.sites || [];
+      locationExists = sites.some(loc => {
         try {
           const locId = loc._id instanceof mongoose.Types.ObjectId ? loc._id.toString() : loc._id.toString();
-          const match = locId === stock.locationId;
-          console.log(`Comparaison location _id: ${locId} avec locationId: ${stock.locationId}, Résultat: ${match}`);
-          return match;
+          return locId === stock.locationId;
         } catch (error) {
-          console.error(`Erreur lors de la comparaison dans locations pour loc: ${JSON.stringify(loc)}`, error);
+          return false;
+        }
+      }) || locations.some(loc => {
+        try {
+          const locId = loc._id instanceof mongoose.Types.ObjectId ? loc._id.toString() : loc._id.toString();
+          return locId === stock.locationId;
+        } catch (error) {
           return false;
         }
       });
-      locationExists = locationExists || locationsExist;
-      console.log(`Locations vérifiées: ${locationsExist}`);
 
-      console.log(`Location existe: ${locationExists}`);
       if (!locationExists) {
         return res.status(400).json({ message: `Site ${stock.locationId} invalide pour ce supermarché` });
       }
@@ -113,10 +92,10 @@ exports.createProduct = async (req, res) => {
 exports.getProductsBySupermarket = async (req, res) => {
   try {
     const { supermarketId } = req.params;
-    const { locationId, category } = req.query; // Filtres optionnels
+    const { locationId, category } = req.query;
 
-    console.log('SupermarketId reçu:', supermarketId); // Log pour débogage
-    console.log('Query params:', { locationId, category }); // Log supplémentaire
+    console.log('SupermarketId reçu:', supermarketId);
+    console.log('Query params:', { locationId, category });
 
     // Valider que supermarketId est un ObjectId valide
     if (!mongoose.Types.ObjectId.isValid(supermarketId)) {
@@ -133,18 +112,17 @@ exports.getProductsBySupermarket = async (req, res) => {
 
     const supermarketObj = supermarket.toObject();
 
-    // Construire la requête (supermarketId est maintenant toujours une chaîne)
+    // Construire la requête
     let query = { supermarketId: supermarketId };
     if (category) {
-      // Normaliser la catégorie pour gérer les caractères non-ASCII
       const normalizedCategory = category.normalize('NFC');
       query.category = normalizedCategory;
     }
 
-    console.log('Requête MongoDB:', query); // Log pour débogage
+    console.log('Requête MongoDB:', query);
     const products = await Product.find(query);
 
-    // Filtrer par locationId si fourni (pour ne retourner que le stock de ce site)
+    // Filtrer par locationId si fourni (mais retourner tous les produits, même ceux avec stock 0)
     if (locationId) {
       const locations = supermarketObj.locations || [];
       const sites = supermarketObj.sites || [];
@@ -160,6 +138,7 @@ exports.getProductsBySupermarket = async (req, res) => {
         return res.status(400).json({ message: 'Site invalide pour ce supermarché' });
       }
 
+      // On garde tous les produits, mais on ajuste stockByLocation pour ne contenir que le stock du site demandé
       products.forEach(product => {
         product.stockByLocation = product.stockByLocation.filter(stock => stock.locationId === locationId);
       });
@@ -167,7 +146,7 @@ exports.getProductsBySupermarket = async (req, res) => {
 
     res.status(200).json(products);
   } catch (error) {
-    console.error('Erreur dans getProductsBySupermarket:', error); // Log pour débogage
+    console.error('Erreur dans getProductsBySupermarket:', error);
     res.status(500).json({ message: 'Erreur lors de la récupération des produits', error: error.message });
   }
 };
@@ -183,6 +162,45 @@ exports.getProductById = async (req, res) => {
     res.status(200).json(product);
   } catch (error) {
     res.status(500).json({ message: 'Erreur lors de la récupération du produit', error: error.message });
+  }
+};
+
+// Récupérer les substituts d’un produit
+exports.getSubstitutes = async (req, res) => {
+  try {
+    const { category, supermarketId, locationId } = req.params;
+
+    // Valider les paramètres
+    if (!mongoose.Types.ObjectId.isValid(supermarketId)) {
+      return res.status(400).json({ message: 'ID du supermarché invalide' });
+    }
+
+    // Vérifier que le supermarché existe
+    const supermarket = await Supermarket.findById(supermarketId);
+    if (!supermarket) {
+      return res.status(404).json({ message: 'Supermarché non trouvé' });
+    }
+
+    const supermarketObj = supermarket.toObject();
+    const locationExists = supermarketObj.locations.some(loc => loc._id.toString() === locationId);
+    if (!locationExists) {
+      return res.status(400).json({ message: 'Site invalide pour ce supermarché' });
+    }
+
+    // Rechercher des produits de la même catégorie, même site, avec stock > 0
+    const substitutes = await Product.find({
+      supermarketId,
+      category: category.normalize('NFC'),
+      _id: { $ne: req.query.excludeProductId }, // Exclure le produit initial si fourni
+      stockByLocation: {
+        $elemMatch: { locationId: locationId, stock: { $gt: 0 } }
+      }
+    }).limit(4);
+
+    res.status(200).json(substitutes);
+  } catch (error) {
+    console.error('Erreur lors de la récupération des substituts:', error.message);
+    res.status(500).json({ message: 'Erreur lors de la récupération des substituts', error: error.message });
   }
 };
 
@@ -210,12 +228,12 @@ exports.updateProduct = async (req, res) => {
 
     const supermarketObj = supermarket.toObject();
 
-    // Ajout de la validation pour price
+    // Validation pour price
     if (price !== undefined && price < 0) {
       return res.status(400).json({ message: 'Le prix du produit ne peut pas être négatif' });
     }
 
-    // Ajout de la validation pour weight
+    // Validation pour weight
     if (weight !== undefined && (typeof weight !== 'number' || weight <= 0)) {
       return res.status(400).json({ message: 'Le poids doit être un nombre positif' });
     }

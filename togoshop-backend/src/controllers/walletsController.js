@@ -1,43 +1,42 @@
 const mongoose = require('mongoose');
-const { sendNotification } = require('../services/notifications');
-
-// Schéma temporaire pour le portefeuille (à ajouter dans models/Wallet.js plus tard)
-const walletSchema = new mongoose.Schema({
-  clientId: { type: mongoose.Schema.Types.ObjectId, required: true, unique: true },
-  balance: { type: Number, default: 0 },
-  transactions: [
-    {
-      type: { type: String, enum: ['deposit', 'payment', 'credit', 'refund'], required: true },
-      amount: { type: Number, required: true },
-      description: { type: String, required: true },
-      date: { type: Date, default: Date.now },
-    },
-  ],
-});
-
 const Wallet = require('../models/Wallet');
+const { sendNotification } = require('../services/notifications');
+const { processExternalPayment } = require('../services/paymentGateway');
 
-// Créditer le portefeuille (dépôt par le client)
+// Créditer le portefeuille (dépôt par le client via Flooz/TMoney)
 exports.depositToWallet = async (req, res) => {
   try {
-    const { amount, method } = req.body;
+    const { amount, method, clientPhone } = req.body;
 
     // Vérifier les champs
-    if (!amount || amount <= 0 || !method) {
-      return res.status(400).json({ message: 'Montant positif et méthode de paiement requis' });
+    if (!amount || amount <= 0) {
+      return res.status(400).json({ message: 'Montant positif requis' });
+    }
+    if (!method || !['Flooz', 'TMoney'].includes(method)) {
+      return res.status(400).json({ message: 'Méthode de paiement non supportée. Utilisez Flooz ou TMoney' });
+    }
+    if (!clientPhone) {
+      return res.status(400).json({ message: 'Numéro de téléphone requis pour Flooz/TMoney' });
     }
 
     // Trouver ou créer le portefeuille du client
-    let wallet = await Wallet.findOne({ clientId: req.user.id });
+    let wallet = await Wallet.findOne({ userId: req.user.id });
     if (!wallet) {
-      wallet = new Wallet({ clientId: req.user.id });
+      wallet = new Wallet({ userId: req.user.id, balance: 0, transactions: [] });
+    }
+
+    // Traiter le paiement externe via Flooz/TMoney
+    const paymentResult = await processExternalPayment({ amount, method, clientPhone });
+    if (!paymentResult.success) {
+      return res.status(400).json({ message: paymentResult.message });
     }
 
     // Ajouter la transaction de dépôt
     wallet.transactions.push({
       type: 'deposit',
       amount,
-      description: `Dépôt via ${method}`,
+      description: `Dépôt via ${method} (Transaction ID: ${paymentResult.transactionId})`,
+      date: new Date(),
     });
 
     // Mettre à jour le solde
@@ -49,6 +48,7 @@ exports.depositToWallet = async (req, res) => {
 
     res.status(200).json({ message: 'Dépôt effectué avec succès', balance: wallet.balance });
   } catch (error) {
+    console.error('Erreur lors du dépôt:', error.message);
     res.status(500).json({ message: 'Erreur lors du dépôt', error: error.message });
   }
 };
@@ -56,13 +56,14 @@ exports.depositToWallet = async (req, res) => {
 // Consulter le solde et l’historique
 exports.getWallet = async (req, res) => {
   try {
-    const wallet = await Wallet.findOne({ clientId: req.user.id });
+    let wallet = await Wallet.findOne({ userId: req.user.id });
     if (!wallet) {
-      return res.status(404).json({ message: 'Portefeuille non trouvé', balance: 0, transactions: [] });
+      wallet = new Wallet({ userId: req.user.id, balance: 0, transactions: [] });
+      await wallet.save();
     }
-
     res.status(200).json(wallet);
   } catch (error) {
+    console.error('Erreur lors de la récupération du portefeuille:', error.message);
     res.status(500).json({ message: 'Erreur lors de la récupération du portefeuille', error: error.message });
   }
 };
@@ -70,7 +71,7 @@ exports.getWallet = async (req, res) => {
 // Créditer un portefeuille pour une remise ou compensation
 exports.creditWallet = async (req, res) => {
   try {
-    const { clientId, amount, description } = req.body;
+    const { userId, amount, description } = req.body;
 
     // Vérifier les autorisations (admin ou validateur)
     if (req.user.role !== 'admin' && req.user.role !== 'order_validator') {
@@ -78,14 +79,14 @@ exports.creditWallet = async (req, res) => {
     }
 
     // Vérifier les champs
-    if (!clientId || !amount || amount <= 0 || !description) {
-      return res.status(400).json({ message: 'Client ID, montant positif et description requis' });
+    if (!userId || !amount || amount <= 0 || !description) {
+      return res.status(400).json({ message: 'User ID, montant positif et description requis' });
     }
 
     // Trouver ou créer le portefeuille du client
-    let wallet = await Wallet.findOne({ clientId });
+    let wallet = await Wallet.findOne({ userId });
     if (!wallet) {
-      wallet = new Wallet({ clientId });
+      wallet = new Wallet({ userId, balance: 0, transactions: [] });
     }
 
     // Ajouter la transaction de crédit
@@ -93,6 +94,7 @@ exports.creditWallet = async (req, res) => {
       type: 'credit',
       amount,
       description,
+      date: new Date(),
     });
 
     // Mettre à jour le solde
@@ -100,10 +102,11 @@ exports.creditWallet = async (req, res) => {
     await wallet.save();
 
     // Notifier le client
-    await sendNotification(clientId, `Votre portefeuille a été crédité de ${amount} FCFA : ${description}`);
+    await sendNotification(userId, `Votre portefeuille a été crédité de ${amount} FCFA : ${description}`);
 
     res.status(200).json({ message: 'Portefeuille crédité avec succès', balance: wallet.balance });
   } catch (error) {
+    console.error('Erreur lors du crédit:', error.message);
     res.status(500).json({ message: 'Erreur lors du crédit', error: error.message });
   }
 };
