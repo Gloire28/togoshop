@@ -4,21 +4,58 @@ const Product = require('../models/Product');
 const Payment = require('../models/Payment');
 const Supermarket = require('../models/Supermarket');
 const Driver = require('../models/Driver');
+const Loyalty = require('../models/loyalty');
 const { assignManager } = require('../services/managerOptimizer');
 const { assignDriver } = require('../services/optimizer');
 const { sendNotification } = require('../services/notifications');
 const { calculateDistance } = require('../services/geolocationBackend');
+const loyaltyController = require('./loyaltyController');
+
+// Fonction utilitaire pour ajouter des points de fidélité
+const addLoyaltyPoints = async (userId, points, description) => {
+  try {
+    let loyalty = await Loyalty.findOne({ userId });
+    if (!loyalty) {
+      loyalty = new Loyalty({ userId, points: 0, transactions: [] });
+    }
+
+    loyalty.points += points;
+    loyalty.transactions.push({
+      type: 'credit',
+      points,
+      description,
+      date: new Date(),
+    });
+
+    await loyalty.save();
+    console.log(`Points ajoutés pour userId ${userId}: ${points} points, description: ${description}`);
+    return loyalty;
+  } catch (error) {
+    console.error('Erreur lors de l\'ajout des points de fidélité:', error.message);
+    throw error;
+  }
+};
 
 // Créer une nouvelle commande
 exports.createOrder = async (req, res) => {
   try {
-    const { products, supermarketId, locationId, deliveryAddress, scheduledDeliveryTime, deliveryType, comments } = req.body;
+    const { clientId, products, supermarketId, locationId, deliveryAddress, scheduledDeliveryTime, deliveryType, comments } = req.body;
 
+    // Validation des champs requis
     if (!products || !Array.isArray(products) || products.length === 0 || !supermarketId || !locationId || !deliveryAddress || !deliveryAddress.address) {
       console.log('Champs manquants dans la requête:', { products, supermarketId, locationId, deliveryAddress });
       return res.status(400).json({ message: 'Produits, supermarché, site et adresse de livraison sont requis' });
     }
 
+    // Définir clientId : admins peuvent spécifier un clientId, clients utilisent leur propre ID
+    const orderClientId = req.user.role === 'admin' ? clientId : req.user.id;
+    if (!orderClientId) {
+      return res.status(400).json({ message: 'clientId est requis pour les administrateurs' });
+    }
+
+    console.log('User ID:', req.user.id, 'User Role:', req.user.role, 'Client ID:', clientId);
+
+    // Recherche du supermarché
     console.log('Recherche du supermarché avec _id:', supermarketId);
     const supermarket = await Supermarket.findById(supermarketId);
     if (!supermarket) {
@@ -29,6 +66,7 @@ exports.createOrder = async (req, res) => {
     const supermarketObj = supermarket.toObject();
     console.log('Supermarché récupéré (après toObject):', JSON.stringify(supermarketObj));
 
+    // Vérification des emplacements du supermarché
     if (!supermarketObj.locations || !Array.isArray(supermarketObj.locations)) {
       console.log('Aucun emplacement défini pour le supermarché:', supermarketId);
       return res.status(400).json({ message: 'Le supermarché n’a pas d’emplacements définis' });
@@ -51,6 +89,7 @@ exports.createOrder = async (req, res) => {
     const stockIssues = [];
     const updatedProducts = [];
 
+    // Vérification des produits et calcul du montant total
     for (const item of products) {
       if (!item.productId || !item.quantity || item.quantity < 1) {
         console.log('Produit invalide:', item);
@@ -158,6 +197,7 @@ exports.createOrder = async (req, res) => {
       });
     }
 
+    // Calcul des frais de livraison
     let deliveryFee = deliveryType === 'evening' ? 400 : 500;
     if (deliveryType !== 'evening') {
       const distance = calculateDistance(location.latitude, location.longitude, deliveryAddress.lat || 6.1725, deliveryAddress.lng || 1.2314);
@@ -167,6 +207,7 @@ exports.createOrder = async (req, res) => {
       console.log(`Frais de livraison calculés: base=500, distanceFee=${distanceFee}, weightFee=${weightFee}, total=${deliveryFee}`);
     }
 
+    // Validation du montant total et des frais
     if (totalAmount < 0) {
       console.log('Montant total négatif détecté:', totalAmount);
       return res.status(400).json({ message: 'Le montant total ne peut pas être négatif' });
@@ -176,10 +217,12 @@ exports.createOrder = async (req, res) => {
       return res.status(400).json({ message: 'Les frais de livraison ne peuvent pas être négatifs' });
     }
 
+    // Calcul de la position dans la file d'attente
     const pendingOrders = await Order.countDocuments({ supermarketId, locationId, status: { $in: ['pending_validation', 'awaiting_validator'] } });
     const queuePosition = pendingOrders + 1;
     console.log(`Position dans la file d'attente: ${queuePosition}`);
 
+    // Assignation d'un validateur (manager)
     let assignedManager = null;
     try {
       assignedManager = await assignManager(String(supermarketId), String(locationId));
@@ -197,8 +240,9 @@ exports.createOrder = async (req, res) => {
       lng: deliveryAddress.lng || 1.2314,
     };
 
+    // Création et sauvegarde de la commande
     const order = new Order({
-      clientId: req.user.id,
+      clientId: orderClientId,
       supermarketId,
       locationId,
       products: updatedProducts,
@@ -222,8 +266,9 @@ exports.createOrder = async (req, res) => {
       throw error;
     }
 
-    await sendNotification(req.user.id, `Votre commande est en attente (position ${queuePosition})`);
-    console.log(`Notification envoyée au client ${req.user.id}`);
+    // Envoi d'une notification au client
+    await sendNotification(orderClientId, `Votre commande est en attente (position ${queuePosition})`);
+    console.log(`Notification envoyée au client ${orderClientId}`);
 
     res.status(201).json(order);
   } catch (error) {
@@ -237,11 +282,13 @@ exports.getPendingOrders = async (req, res) => {
   try {
     const { supermarketId } = req.params;
 
+    // Vérification des permissions (admin ou validateur)
     if (req.user.role !== 'admin' && !(req.user.role === 'order_validator' && req.user.supermarketId === supermarketId)) {
       console.log(`Accès refusé pour utilisateur ${req.user.id}, rôle: ${req.user.role}, supermarketId: ${req.user.supermarketId}`);
       return res.status(403).json({ message: 'Accès réservé à l’administrateur ou au validateur de commandes' });
     }
 
+    // Récupération des commandes en attente
     const orders = await Order.find({ supermarketId, status: { $in: ['pending_validation', 'awaiting_validator'] } })
       .populate('products.productId')
       .sort('createdAt');
@@ -326,6 +373,30 @@ exports.getUserOrderHistory = async (req, res) => {
   } catch (error) {
     console.error('Erreur lors de la récupération de l\'historique:', error.message);
     res.status(500).json({ message: 'Erreur lors de la récupération de l\'historique', error: error.message });
+  }
+};
+// Récupérer toutes les commandes de l'utilisateur connecté (pour /api/orders/me)
+exports.getMyOrders = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    console.log(`Récupération de toutes les commandes pour utilisateur ${userId}`);
+
+    const orders = await Order.find({ clientId: userId })
+      .populate('products.productId')
+      .populate('supermarketId')
+      .populate('driverId')
+      .sort('-createdAt');
+
+    if (!orders || orders.length === 0) {
+      console.log(`Aucune commande trouvée pour utilisateur ${userId}`);
+      return res.status(404).json({ message: 'Aucune commande trouvée' });
+    }
+
+    console.log(`Commandes récupérées pour utilisateur ${userId}: ${orders.length} commandes`);
+    res.status(200).json(orders);
+  } catch (error) {
+    console.error('Erreur lors de la récupération des commandes:', error.message);
+    res.status(500).json({ message: 'Erreur lors de la récupération des commandes', error: error.message });
   }
 };
 
@@ -493,7 +564,169 @@ exports.updateOrder = async (req, res) => {
   }
 };
 
-// Mettre à jour le statut d'une commande
+exports.updateOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { products } = req.body;
+
+    console.log(`Mise à jour de la commande ${id} avec nouveaux produits:`, products);
+
+    let order = await Order.findById(id).populate('products.productId');
+    if (!order) {
+      console.log(`Commande non trouvée pour _id ${id}`);
+      return res.status(404).json({ message: 'Commande non trouvée' });
+    }
+
+    if (order.clientId.toString() !== req.user.id) {
+      console.log(`Utilisateur ${req.user.id} non autorisé à modifier la commande ${id}`);
+      return res.status(403).json({ message: 'Non autorisé à modifier cette commande' });
+    }
+
+    if (!['pending_validation', 'awaiting_validator'].includes(order.status)) {
+      console.log(`Commande ${id} n'est plus modifiable, statut: ${order.status}`);
+      return res.status(400).json({ message: 'La commande n’est plus modifiable' });
+    }
+
+    if (!products || !Array.isArray(products)) {
+      console.log('Produits invalides dans la requête:', products);
+      return res.status(400).json({ message: 'Liste de produits requise' });
+    }
+
+    const supermarket = await Supermarket.findById(order.supermarketId);
+    if (!supermarket) {
+      console.log('Supermarché non trouvé pour _id:', order.supermarketId);
+      return res.status(404).json({ message: 'Supermarché non trouvé' });
+    }
+
+    const supermarketObj = supermarket.toObject();
+    const location = supermarketObj.locations.find(loc => loc._id.toString() === order.locationId);
+    if (!location) {
+      console.log(`Site ${order.locationId} non trouvé dans les sites du supermarché`);
+      return res.status(400).json({ message: `Site ${order.locationId} invalide pour ce supermarché` });
+    }
+
+    let totalAmount = 0;
+    let totalWeight = 0;
+    let additionalFees = 0;
+    const stockIssues = [];
+    const updatedProducts = [];
+
+    for (const item of products) {
+      if (!item.productId || !item.quantity || item.quantity < 1) {
+        console.log('Produit invalide:', item);
+        return res.status(400).json({ message: 'Chaque produit doit avoir un productId et une quantité positive' });
+      }
+
+      const product = await Product.findById(item.productId);
+      if (!product) {
+        console.log('Produit non trouvé pour _id:', item.productId);
+        return res.status(404).json({ message: `Produit ${item.productId} non trouvé` });
+      }
+
+      if (product.supermarketId.toString() !== order.supermarketId.toString()) {
+        console.log(`Produit ${item.productId} n’appartient pas au supermarché ${order.supermarketId}`);
+        return res.status(400).json({ message: `Produit ${item.productId} n’appartient pas à ce supermarché` });
+      }
+
+      let stockLocationId = order.locationId;
+      let itemAdditionalFee = 0;
+      if (item.alternativeLocationId) {
+        stockLocationId = item.alternativeLocationId;
+        const altLocation = supermarketObj.locations.find(loc => loc._id.toString() === stockLocationId);
+        if (!altLocation) {
+          console.log(`Site alternatif ${stockLocationId} invalide`);
+          return res.status(400).json({ message: `Site alternatif ${stockLocationId} invalide` });
+        }
+        const distance = calculateDistance(location.latitude, location.longitude, altLocation.latitude, altLocation.longitude);
+        itemAdditionalFee = 200 + 50 * distance;
+        additionalFees += itemAdditionalFee;
+        console.log(`Frais supplémentaires pour ${item.productId} à ${stockLocationId}: ${itemAdditionalFee} FCFA`);
+      }
+
+      const stock = product.stockByLocation.find(loc => loc.locationId === stockLocationId);
+      if (!stock || stock.stock < item.quantity) {
+        console.log(`Rupture de stock pour productId: ${item.productId}, locationId: ${stockLocationId}`);
+        const substitutes = await Product.find({
+          supermarketId: order.supermarketId,
+          category: product.category,
+          _id: { $ne: product._id },
+          stockByLocation: {
+            $elemMatch: { locationId: order.locationId, stock: { $gte: item.quantity } }
+          }
+        }).limit(3);
+
+        const otherLocations = product.stockByLocation.filter(loc => loc.locationId !== order.locationId && loc.stock >= item.quantity);
+        const alternativeSites = otherLocations.map(loc => {
+          const altLocation = supermarketObj.locations.find(l => l._id.toString() === loc.locationId);
+          const distance = calculateDistance(location.latitude, location.longitude, altLocation.latitude, altLocation.longitude);
+          return {
+            locationId: loc.locationId,
+            stock: loc.stock,
+            additionalFee: Math.round(200 + 50 * distance),
+          };
+        });
+
+        stockIssues.push({
+          productId: item.productId,
+          productName: product.name,
+          requestedQuantity: item.quantity,
+          availableStock: stock ? stock.stock : 0,
+          substitutes: substitutes.map(sub => ({ id: sub._id, name: sub.name, price: sub.price })),
+          alternativeSites,
+        });
+      } else {
+        totalAmount += product.price * item.quantity;
+        totalWeight += (product.weight || 1) * item.quantity;
+        updatedProducts.push({
+          productId: item.productId,
+          quantity: item.quantity,
+          alternativeLocationId: item.alternativeLocationId,
+        });
+      }
+    }
+
+    if (stockIssues.length > 0) {
+      console.log('Problèmes de stock détectés lors de la mise à jour:', JSON.stringify(stockIssues));
+      return res.status(200).json({
+        message: 'Problème de stock pour certains produits',
+        stockIssues,
+        options: {
+          A: 'Choisir un produit de substitution',
+          B: 'Choisir le même produit dans un autre site (frais supplémentaires)',
+          C: 'Retirer ce produit',
+          D: 'Être notifié quand le produit est disponible',
+        },
+        partialOrder: {
+          products: updatedProducts,
+          totalAmount,
+          deliveryFee: order.deliveryFee,
+        },
+      });
+    }
+
+    let deliveryFee = order.deliveryFee;
+    if (order.deliveryType !== 'evening') {
+      const distance = calculateDistance(location.latitude, location.longitude, order.deliveryAddress.lat || 6.1725, order.deliveryAddress.lng || 1.2314);
+      const distanceFee = distance > 5 ? (distance - 5) * 100 : 0;
+      const weightFee = totalWeight > 5 ? (totalWeight - 5) * 50 : 0;
+      deliveryFee = 500 + distanceFee + weightFee;
+      console.log(`Frais de livraison recalculés: base=500, distanceFee=${distanceFee}, weightFee=${weightFee}, total=${deliveryFee}`);
+    }
+
+    order.products = updatedProducts;
+    order.totalAmount = totalAmount;
+    order.deliveryFee = deliveryFee;
+    order.additionalFees = additionalFees;
+    await order.save();
+
+    console.log(`Commande ${id} mise à jour avec succès`);
+    res.status(200).json(order);
+  } catch (error) {
+    console.error('Erreur lors de la mise à jour de la commande:', error.message);
+    res.status(500).json({ message: 'Erreur lors de la mise à jour de la commande', error: error.message });
+  }
+};
+
 exports.updateOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -504,19 +737,44 @@ exports.updateOrderStatus = async (req, res) => {
       console.log(`Commande non trouvée pour _id ${id}`);
       return res.status(404).json({ message: 'Commande non trouvée' });
     }
+
     console.log(`Commande récupérée pour _id ${id}:`, order);
 
-    if (req.user.role !== 'admin' && !(req.user.role === 'order_validator' && req.user.supermarketId === order.supermarketId.toString())) {
-      console.log(`Accès refusé pour utilisateur ${req.user.id}, rôle: ${req.user.role}, supermarketId: ${req.user.supermarketId}`);
-      return res.status(403).json({ message: 'Accès réservé à l’administrateur ou au validateur de commandes' });
+    // Vérification des permissions
+    if (req.user.roles && !req.user.roles.includes('admin') && !(req.user.roles.includes('order_validator') && req.user.supermarketId && req.user.supermarketId.toString() === order.supermarketId.toString())) {
+      // Exception pour les drivers qui mettent à jour leur propre commande à 'delivered'
+      if (!(req.user.role === 'driver' && status === 'delivered' && order.driverId && order.driverId.toString() === req.user.id)) {
+        console.log(`Accès refusé pour utilisateur ${req.user.id}, rôles: ${req.user.roles}, supermarketId: ${req.user.supermarketId}`);
+        return res.status(403).json({ message: 'Accès réservé à l’administrateur ou au validateur de commandes' });
+      }
+      console.log(`Accès autorisé: Driver ${req.user.id} met à jour sa propre commande à 'delivered'`);
     }
 
+    // Définition des transitions de statut valides
+    const statusTransitions = {
+      'pending_validation': ['validated', 'cancelled'],
+      'awaiting_validator': ['pending_validation', 'cancelled'],
+      'validated': ['in_delivery', 'cancelled'],
+      'in_delivery': ['delivered', 'cancelled'],
+      'delivered': [],
+      'cancelled': [],
+    };
+
+    // Validation du nouveau statut
     const validStatuses = ['pending_validation', 'awaiting_validator', 'validated', 'in_delivery', 'delivered', 'cancelled'];
     if (!validStatuses.includes(status)) {
       console.log(`Statut invalide: ${status}`);
       return res.status(400).json({ message: 'Statut invalide' });
     }
 
+    // Vérification des transitions de statut
+    const allowedTransitions = statusTransitions[order.status] || [];
+    if (!allowedTransitions.includes(status)) {
+      console.log(`Transition de statut non autorisée: de ${order.status} à ${status}`);
+      return res.status(400).json({ message: `Transition de statut non autorisée: de ${order.status} à ${status}` });
+    }
+
+    // Vérification du paiement pour le statut 'validated'
     if (status === 'validated') {
       const payment = await Payment.findOne({ orderId: id });
       if (!payment || payment.status !== 'completed') {
@@ -525,7 +783,9 @@ exports.updateOrderStatus = async (req, res) => {
       }
     }
 
-    if (status === 'validated' && order.status !== 'validated' && !order.driverId) {
+    // Gestion des transitions spécifiques
+    if (status === 'validated' && order.status !== 'validated') {
+      // Mise à jour du stock
       for (const item of order.products) {
         console.log(`Traitement du produit ${item.productId} avec quantité ${item.quantity}`);
 
@@ -559,14 +819,66 @@ exports.updateOrderStatus = async (req, res) => {
         await product.save();
         console.log(`Produit sauvegardé après mise à jour du stock:`, product);
       }
+    }
 
-      const driverId = await assignDriver(order._id);
-      console.log(`Livreur assigné, driverId: ${driverId}`);
-      order.driverId = driverId;
-      order.status = 'in_delivery';
-    } else if (status === 'delivered' && order.status === 'in_delivery') {
+    // Assignation du livreur lors du passage à in_delivery
+    if (status === 'in_delivery' && !order.driverId) {
+      try {
+        const supermarket = await Supermarket.findOne({ _id: order.supermarketId });
+        if (!supermarket) {
+          console.log(`Supermarché ${order.supermarketId} non trouvé`);
+          return res.status(404).json({ message: 'Supermarché non trouvé' });
+        }
+
+        const location = supermarket.locations.find(loc => loc._id === order.locationId);
+        if (!location) {
+          console.log(`Emplacement ${order.locationId} non trouvé pour le supermarché ${order.supermarketId}`);
+          return res.status(404).json({ message: 'Emplacement non trouvé pour ce supermarché' });
+        }
+
+        const supermarketLocation = { lat: location.latitude, lng: location.longitude };
+        console.log(`Position du supermarché:`, supermarketLocation);
+
+        const managerLocation = req.user.location || { lat: order.deliveryAddress.lat, lng: order.deliveryAddress.lng };
+        console.log(`Position du manager:`, managerLocation);
+
+        const driverId = await assignDriver(order._id, managerLocation);
+        console.log(`Livreur assigné, driverId: ${driverId}`);
+        order.driverId = driverId;
+      } catch (error) {
+        console.error('Erreur lors de l\'assignation du livreur:', error.message);
+        return res.status(500).json({ message: 'Erreur lors de l’assignation du livreur', error: error.message });
+      }
+    } else if (status === 'delivered') {
       order.status = status;
 
+      // Ajout des points de fidélité
+      const points = Math.floor(order.totalAmount / 1000); // 1 point par 1000 FCFA
+      console.log(`Ajout de ${points} points de fidélité pour la commande ${id} avec montant ${order.totalAmount}`);
+
+      try {
+        await loyaltyController.addPoints({
+          user: { id: order.clientId.toString(), role: 'client' },
+          body: {
+            points: points,
+            description: `Commande livrée (ID: ${order._id})`,
+            fromOrder: true
+          }
+        }, {
+          status: (code) => ({ json: (data) => console.log('Réponse ajout points:', data) }),
+          json: (data) => console.log('Réponse ajout points:', data)
+        });
+        console.log(`Points ajoutés avec succès pour l'utilisateur ${order.clientId}`);
+      } catch (error) {
+        console.error('Erreur lors de l’ajout des points:', error.message);
+      }
+
+      await sendNotification(
+        order.clientId,
+        `Votre commande (ID: ${order._id}) a été livrée ! Vous avez gagné ${points} points de fidélité.`
+      );
+
+      // Mise à jour du livreur (si présent)
       if (order.driverId) {
         const driver = await Driver.findOne({ _id: new mongoose.Types.ObjectId(order.driverId) });
         if (driver) {
@@ -578,7 +890,7 @@ exports.updateOrderStatus = async (req, res) => {
           console.log(`Livreur non trouvé pour driverId: ${order.driverId}`);
         }
       } else {
-        console.log('Aucun driverId trouvé pour cette commande');
+        console.log('Aucun driverId trouvé pour cette commande, points ajoutés malgré tout');
       }
     } else {
       order.status = status;

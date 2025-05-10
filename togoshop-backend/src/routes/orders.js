@@ -5,25 +5,17 @@ const auth = require('../middleware/auth');
 const mongoose = require('mongoose');
 const Product = require('../models/Product');
 
-// Créer une nouvelle commande
-router.post('/', auth, ordersController.createOrder);
+// Routes de gestion des commandes
+router.post('/', auth, ordersController.createOrder); // Créer une nouvelle commande
+router.get('/supermarket/:supermarketId/pending', auth, ordersController.getPendingOrders); // Lister les commandes en attente
+router.get('/user/cart', auth, ordersController.getUserCart); // Récupérer le panier
+router.get('/user/me', auth, ordersController.getMyOrders); // Récupérer toutes les commandes de l'utilisateur
+router.get('/user/history', auth, ordersController.getUserOrderHistory); // Récupérer l'historique des commandes
+router.get('/:id', auth, ordersController.getOrderById); // Récupérer une commande spécifique
+router.put('/:id', auth, ordersController.updateOrder); // Mettre à jour une commande
+router.put('/:id/status', auth, ordersController.updateOrderStatus); // Mettre à jour le statut d'une commande
 
-// Lister les commandes en attente pour un supermarché
-router.get('/supermarket/:supermarketId/pending', auth, ordersController.getPendingOrders);
-
-// Récupérer le panier de l'utilisateur
-router.get('/user/cart', auth, ordersController.getUserCart);
-
-// Récupérer une commande spécifique
-router.get('/:id', auth, ordersController.getOrderById);
-
-// Mettre à jour une commande
-router.put('/:id', auth, ordersController.updateOrder);
-
-// Mettre à jour le statut d'une commande
-router.put('/:id/status', auth, ordersController.updateOrderStatus);
-
-// Endpoint de debug pour récupérer un produit
+// Endpoint de débogage
 router.get('/debug/product/:id', auth, async (req, res) => {
   try {
     console.log(`Requête GET /api/debug/product/:id avec id=${req.params.id}`);

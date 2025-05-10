@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const Manager = require('../models/Manager');
+const Driver = require('../models/Driver');
 
 // Inscription
 exports.register = async (req, res) => {
@@ -17,17 +18,16 @@ exports.register = async (req, res) => {
 
     if (role === 'manager') {
       Model = Manager;
-      // Vérifier les champs requis pour un manager
       if (!name || !supermarketId || !locationId) {
         return res.status(400).json({ message: 'name, supermarketId et locationId sont requis pour un manager' });
       }
-      userData = {
-        ...userData,
-        name,
-        supermarketId,
-        locationId,
-        roles: ['order_validator', 'stock_manager'],
-      };
+      userData = { ...userData, name, supermarketId, locationId, roles: ['order_validator', 'stock_manager'] };
+    } else if (role === 'driver') {
+      Model = Driver;
+      if (!name || !phoneNumber) {
+        return res.status(400).json({ message: 'name et phoneNumber sont requis pour un driver' });
+      }
+      userData = { ...userData, name, phoneNumber };
     } else {
       Model = User;
       userData.role = role || 'client';
@@ -64,37 +64,50 @@ exports.login = async (req, res) => {
       return res.status(400).json({ message: 'Email et mot de passe requis' });
     }
 
+    console.log('Requête reçue: POST /api/auth/login');
     console.log('Recherche de l’utilisateur avec email:', email);
-    // Vérifier d'abord dans la collection User
+
+    // Recherche dans User (clients/admins)
     let user = await User.findOne({ email });
+    let role = user ? user.role : null;
     let Model = User;
 
     if (!user) {
       console.log('Utilisateur non trouvé dans User, recherche dans Manager...');
       user = await Manager.findOne({ email });
+      role = 'manager';
       Model = Manager;
     }
 
     if (!user) {
+      console.log('Utilisateur non trouvé dans Manager, recherche dans Driver...');
+      user = await Driver.findOne({ email });
+      role = 'driver';
+      Model = Driver;
+    }
+
+    if (!user) {
       console.log('Utilisateur non trouvé pour email:', email);
-      return res.status(400).json({ message: 'Utilisateur non trouvé' });
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
     }
 
     console.log('Utilisateur trouvé:', user);
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       console.log('Mot de passe incorrect pour email:', email);
-      return res.status(400).json({ message: 'Mot de passe incorrect' });
+      return res.status(401).json({ message: 'Mot de passe incorrect' });
     }
 
-    // Générer un token JWT
-    const tokenPayload = Model === User 
-      ? { id: user._id, role: user.role }
-      : { id: user._id, roles: user.roles };
+    // Générer un token JWT avec une structure unifiée
+    const tokenPayload = {
+      id: user._id,
+      role: role || (Model === Manager ? user.roles[0] : 'client'),
+      roles: Model === Manager ? user.roles : [role || 'client']
+    };
 
     const token = jwt.sign(
       tokenPayload,
-      process.env.JWT_SECRET || 'your_jwt_secret',
+      process.env.JWT_SECRET || 'your_jwt_secret', // Remplacez par votre clé secrète
       { expiresIn: '1h' }
     );
 

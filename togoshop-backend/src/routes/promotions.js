@@ -9,7 +9,7 @@ router.post('/', auth, promotionsController.createPromotion);
 // Lister toutes les promotions actives
 router.get('/', auth, promotionsController.getActivePromotions);
 
-// Appliquer une promotion à une commande (client)
+// Appliquer une promotion à une commande (client ou admin)
 router.post('/apply', auth, promotionsController.applyPromotion);
 
 // Mettre à jour une promotion

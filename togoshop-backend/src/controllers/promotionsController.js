@@ -6,26 +6,22 @@ const Promotion = require('../models/Promotion');
 // Créer une nouvelle promotion
 exports.createPromotion = async (req, res) => {
   try {
-    // Vérifier que l'utilisateur est un admin
     if (req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Accès réservé à l\'administrateur' });
     }
 
-    // Log pour déboguer req.body
     console.log('req.body:', req.body);
 
-    // Vérifier le type de réduction
-    const { discountType, startDate, endDate, minOrderAmount, maxUses, discountValue } = req.body;
+    const { discountType, startDate, endDate, minOrderAmount, maxUses, discountValue, supermarketId } = req.body;
+    if (!supermarketId) {
+      return res.status(400).json({ message: 'supermarketId est requis' });
+    }
     if (discountType && !['percentage', 'fixed'].includes(discountType)) {
       return res.status(400).json({ message: 'Type de réduction invalide (percentage ou fixed)' });
     }
-
-    // Ajout de la validation pour discountValue
     if (discountValue !== undefined && discountValue < 0) {
       return res.status(400).json({ message: 'La valeur de la réduction ne peut pas être négative' });
     }
-
-    // Vérifier les dates
     const now = new Date();
     if (startDate && new Date(startDate) < now) {
       return res.status(400).json({ message: 'La date de début ne peut pas être dans le passé' });
@@ -34,7 +30,6 @@ exports.createPromotion = async (req, res) => {
       return res.status(400).json({ message: 'La date de fin doit être après la date de début' });
     }
 
-    // Créer la promotion en passant directement req.body
     const promotion = new Promotion({
       ...req.body,
       minOrderAmount: minOrderAmount || 0,
@@ -42,9 +37,17 @@ exports.createPromotion = async (req, res) => {
     });
 
     await promotion.save();
+    console.log('Promotion sauvegardée avec succès:', promotion);
+
+    const User = require('../models/User');
+    const clients = await User.find({ role: 'client' });
+    for (const client of clients) {
+      await sendNotification(client._id, `Nouvelle promotion disponible ! Utilisez le code ${promotion.code} pour bénéficier de ${promotion.discountValue}${promotion.discountType === 'percentage' ? '%' : ' FCFA'} de réduction. Valide jusqu'au ${new Date(promotion.endDate).toLocaleDateString()}.`);
+    }
 
     res.status(201).json({ message: 'Promotion créée avec succès', promotion });
   } catch (error) {
+    console.error('Erreur lors de la création de la promotion:', error);
     res.status(500).json({ message: 'Erreur lors de la création de la promotion', error: error.message });
   }
 };
@@ -55,26 +58,22 @@ exports.updatePromotion = async (req, res) => {
     const { id } = req.params;
     const updateData = req.body;
 
-    // Vérifier si la promotion existe
     const promotion = await Promotion.findById(id);
     if (!promotion) {
       return res.status(404).json({ message: 'Promotion non trouvée' });
     }
 
-    // Vérifier si l'utilisateur a le droit de modifier cette promotion
     if (req.user.role !== 'admin' && promotion.supermarketId.toString() !== req.user.supermarketId) {
       return res.status(403).json({ message: 'Accès non autorisé' });
     }
 
-    // Validation de la date de début si elle est fournie
-    if (updateData.startDate) {
-      const now = new Date();
-      if (new Date(updateData.startDate) < now) {
-        return res.status(400).json({ message: 'La date de début ne peut pas être dans le passé' });
-      }
+    if (updateData.startDate && new Date(updateData.startDate) < new Date()) {
+      return res.status(400).json({ message: 'La date de début ne peut pas être dans le passé' });
+    }
+    if (updateData.startDate && updateData.endDate && new Date(updateData.endDate) <= new Date(updateData.startDate)) {
+      return res.status(400).json({ message: 'La date de fin doit être après la date de début' });
     }
 
-    // Mettre à jour la promotion
     const updatedPromotion = await Promotion.findByIdAndUpdate(id, updateData, {
       new: true,
       runValidators: true,
@@ -93,7 +92,7 @@ exports.getActivePromotions = async (req, res) => {
     const promotions = await Promotion.find({
       startDate: { $lte: now },
       endDate: { $gte: now },
-      $expr: { $lt: ['$currentUses', '$maxUses'] }, // Utilisation de $expr pour comparer deux champs
+      $expr: { $lt: ['$currentUses', '$maxUses'] },
     });
 
     res.status(200).json(promotions);
@@ -106,62 +105,67 @@ exports.getActivePromotions = async (req, res) => {
 exports.applyPromotion = async (req, res) => {
   try {
     const { orderId, promoCode } = req.body;
+    console.log('--- Début applyPromotion ---');
+    console.log('Requête reçue:', { orderId, promoCode, user: req.user });
 
-    // Trouver la commande
     const order = await Order.findById(orderId);
+    console.log('Commande trouvée:', order);
     if (!order) {
+      console.log('Erreur: Commande non trouvée');
       return res.status(404).json({ message: 'Commande non trouvée' });
     }
 
-    // Vérifier que l'utilisateur est le client de la commande
     if (req.user.role !== 'admin' && order.clientId.toString() !== req.user.id) {
+      console.log('Accès refusé: Utilisateur non autorisé', { userId: req.user.id, clientId: order.clientId });
       return res.status(403).json({ message: 'Accès non autorisé' });
     }
 
-    // Trouver la promotion
     const now = new Date();
+    console.log('Date actuelle:', now);
     const promotion = await Promotion.findOne({
       code: promoCode,
+      supermarketId: order.supermarketId,
+      $expr: { $lt: ['$currentUses', '$maxUses'] },
       startDate: { $lte: now },
       endDate: { $gte: now },
-      supermarketId: order.supermarketId,
-      $expr: { $lt: ['$currentUses', '$maxUses'] }, // Utilisation de $expr pour comparer deux champs
     });
+    console.log('Promotion trouvée:', promotion);
 
     if (!promotion) {
+      console.log('Erreur: Promotion non trouvée ou non valide');
       return res.status(404).json({ message: 'Promotion non trouvée ou non valide' });
     }
 
-    // Vérifier le montant minimum
-    const orderAmount = order.totalAmount + order.deliveryFee;
+    const orderAmount = order.totalAmount;
+    console.log('Montant de la commande:', orderAmount);
     if (orderAmount < promotion.minOrderAmount) {
+      console.log('Erreur: Montant minimum non atteint');
       return res.status(400).json({ message: `Montant minimum de ${promotion.minOrderAmount} FCFA requis pour cette promotion` });
     }
 
-    // Appliquer la réduction
     let discount = 0;
     if (promotion.discountType === 'percentage') {
       discount = (promotion.discountValue / 100) * orderAmount;
     } else {
       discount = promotion.discountValue;
     }
+    if (discount > orderAmount) discount = orderAmount;
+    console.log('Réduction calculée:', discount);
 
     order.totalAmount -= discount;
-    if (order.totalAmount < 0) order.totalAmount = 0;
-
-    // Mettre à jour l'utilisation de la promotion
     promotion.currentUses += 1;
-    await promotion.save();
+    await Promise.all([promotion.save(), order.save()]);
+    console.log('Commande et promotion mises à jour:', { order, promotion });
 
-    await order.save();
-
-    // Notifier le client
     await sendNotification(order.clientId, `Promotion ${promoCode} appliquée avec succès ! Réduction de ${discount} FCFA`);
+    console.log('Notification envoyée');
 
     res.status(200).json({ message: 'Promotion appliquée avec succès', order });
   } catch (error) {
-    res.status(500).json({ message: "Erreur lors de l'application de la promotion", error: error.message });
+    console.log('Erreur dans applyPromotion:', error.message);
+    res.status(500).json({ message: 'Erreur lors de l\'application de la promotion', error: error.message });
   }
+  console.log('--- Fin applyPromotion ---');
 };
 
 // Supprimer une promotion
@@ -169,18 +173,15 @@ exports.deletePromotion = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Vérifier si la promotion existe
     const promotion = await Promotion.findById(id);
     if (!promotion) {
       return res.status(404).json({ message: 'Promotion non trouvée' });
     }
 
-    // Vérifier si l'utilisateur a le droit de supprimer cette promotion
     if (req.user.role !== 'admin' && promotion.supermarketId.toString() !== req.user.supermarketId) {
       return res.status(403).json({ message: 'Accès non autorisé' });
     }
 
-    // Supprimer la promotion
     await Promotion.findByIdAndDelete(id);
 
     res.json({ message: 'Promotion supprimée avec succès' });

@@ -19,7 +19,7 @@ exports.getUserLoyalty = async (req, res) => {
 // Ajouter des points (par exemple, après une commande ou manuellement par un admin)
 exports.addPoints = async (req, res) => {
   try {
-    const { points, description } = req.body;
+    const { points, description, userId } = req.body;
 
     // Vérifier les autorisations (admin ou automatisé via une commande)
     if (req.user.role !== 'admin' && !req.body.fromOrder) {
@@ -31,10 +31,13 @@ exports.addPoints = async (req, res) => {
       return res.status(400).json({ message: 'Points positifs et description requis' });
     }
 
-    // Trouver ou créer le profil de fidélité de l'utilisateur
-    let loyalty = await Loyalty.findOne({ userId: req.user.id });
+    // Déterminer l'userId cible (req.body.userId si admin, sinon req.user.id)
+    const targetUserId = req.user.role === 'admin' && userId ? userId : req.user.id;
+
+    // Trouver ou créer le profil de fidélité de l'utilisateur cible
+    let loyalty = await Loyalty.findOne({ userId: targetUserId });
     if (!loyalty) {
-      loyalty = new Loyalty({ userId: req.user.id, points: 0, transactions: [] });
+      loyalty = new Loyalty({ userId: targetUserId, points: 0, transactions: [] });
     }
 
     // Ajouter la transaction
@@ -49,8 +52,8 @@ exports.addPoints = async (req, res) => {
     loyalty.points += points;
     await loyalty.save();
 
-    // Notifier l'utilisateur
-    await sendNotification(req.user.id, `Vous avez gagné ${points} points de fidélité !`);
+    // Notifier l'utilisateur cible
+    await sendNotification(targetUserId, `Vous avez gagné ${points} points de fidélité !`);
 
     res.status(200).json({ message: 'Points ajoutés avec succès', loyalty });
   } catch (error) {
