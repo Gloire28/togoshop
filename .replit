@@ -1,0 +1,17 @@
+modules = ["nodejs-20", "web"]
+run = "npm start"
+
+[nix]
+channel = "stable-24_05"
+packages = ["zulu11"]
+
+[deployment]
+run = ["sh", "-c", "npm start"]
+
+[[ports]]
+localPort = 8081
+externalPort = 80
+
+[[ports]]
+localPort = 8082
+externalPort = 3000
