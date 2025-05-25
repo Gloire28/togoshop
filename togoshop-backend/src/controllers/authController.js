@@ -7,7 +7,7 @@ const Driver = require('../models/Driver');
 // Inscription
 exports.register = async (req, res) => {
   try {
-    const { email, password, role, name, supermarketId, locationId } = req.body;
+    const { email, password, role, name, supermarketId, locationId, phoneNumber } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ message: 'Email et mot de passe requis' });
@@ -108,11 +108,22 @@ exports.login = async (req, res) => {
     const token = jwt.sign(
       tokenPayload,
       process.env.JWT_SECRET || 'your_jwt_secret', // Remplacez par votre clé secrète
-      { expiresIn: '1h' }
+      { expiresIn: '5h' }
     );
 
     console.log('Token généré:', token);
-    res.status(200).json({ token });
+
+    // Construire l'objet user à renvoyer
+    const userResponse = {
+      id: user._id,
+      email: user.email,
+      role: role || (Model === Manager ? user.roles[0] : 'client'),
+      // Ajouter d'autres champs pertinents selon le modèle (ex. name pour Manager/Driver)
+      ...(Model === Manager && { name: user.name, supermarketId: user.supermarketId, locationId: user.locationId }),
+      ...(Model === Driver && { name: user.name, phoneNumber: user.phoneNumber }),
+    };
+
+    res.status(200).json({ token, user: userResponse });
   } catch (error) {
     console.error('Erreur lors de la connexion:', error.message);
     res.status(500).json({ message: 'Erreur lors de la connexion', error: error.message });

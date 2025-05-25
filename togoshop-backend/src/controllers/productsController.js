@@ -97,13 +97,11 @@ exports.getProductsBySupermarket = async (req, res) => {
     console.log('SupermarketId reçu:', supermarketId);
     console.log('Query params:', { locationId, category });
 
-    // Valider que supermarketId est un ObjectId valide
     if (!mongoose.Types.ObjectId.isValid(supermarketId)) {
       console.log('Erreur: ID du supermarché invalide');
       return res.status(400).json({ message: 'ID du supermarché invalide' });
     }
 
-    // Vérifier que le supermarché existe
     const supermarket = await Supermarket.findById(supermarketId);
     if (!supermarket) {
       console.log('Erreur: Supermarché non trouvé');
@@ -112,17 +110,16 @@ exports.getProductsBySupermarket = async (req, res) => {
 
     const supermarketObj = supermarket.toObject();
 
-    // Construire la requête
     let query = { supermarketId: supermarketId };
     if (category) {
       const normalizedCategory = category.normalize('NFC');
       query.category = normalizedCategory;
+      console.log(`Filtrage par catégorie: ${normalizedCategory}`);
     }
 
     console.log('Requête MongoDB:', query);
     const products = await Product.find(query);
 
-    // Filtrer par locationId si fourni (mais retourner tous les produits, même ceux avec stock 0)
     if (locationId) {
       const locations = supermarketObj.locations || [];
       const sites = supermarketObj.sites || [];
@@ -138,10 +135,14 @@ exports.getProductsBySupermarket = async (req, res) => {
         return res.status(400).json({ message: 'Site invalide pour ce supermarché' });
       }
 
-      // On garde tous les produits, mais on ajuste stockByLocation pour ne contenir que le stock du site demandé
-      products.forEach(product => {
-        product.stockByLocation = product.stockByLocation.filter(stock => stock.locationId === locationId);
+      // Inclure tous les produits, même ceux sans stock pour ce site
+      const filteredProducts = products.map(product => {
+        const stockEntry = product.stockByLocation.find(stock => stock.locationId === locationId);
+        const updatedStock = stockEntry ? [stockEntry] : [{ locationId: locationId, stock: 0, _id: new mongoose.Types.ObjectId() }];
+        return { ...product.toObject(), stockByLocation: updatedStock };
       });
+      console.log('Produits filtrés:', filteredProducts);
+      return res.status(200).json(filteredProducts);
     }
 
     res.status(200).json(products);

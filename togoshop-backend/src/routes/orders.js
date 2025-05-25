@@ -1,19 +1,25 @@
 const express = require('express');
 const router = express.Router();
 const ordersController = require('../controllers/ordersController');
-const auth = require('../middleware/auth');
+const auth = require('../middleware/auth'); // Importation correcte
 const mongoose = require('mongoose');
 const Product = require('../models/Product');
 
 // Routes de gestion des commandes
-router.post('/', auth, ordersController.createOrder); // Créer une nouvelle commande
-router.get('/supermarket/:supermarketId/pending', auth, ordersController.getPendingOrders); // Lister les commandes en attente
-router.get('/user/cart', auth, ordersController.getUserCart); // Récupérer le panier
-router.get('/user/me', auth, ordersController.getMyOrders); // Récupérer toutes les commandes de l'utilisateur
-router.get('/user/history', auth, ordersController.getUserOrderHistory); // Récupérer l'historique des commandes
-router.get('/:id', auth, ordersController.getOrderById); // Récupérer une commande spécifique
-router.put('/:id', auth, ordersController.updateOrder); // Mettre à jour une commande
-router.put('/:id/status', auth, ordersController.updateOrderStatus); // Mettre à jour le statut d'une commande
+router.post('/', auth, ordersController.createOrder); // Crée une nouvelle commande
+router.get('/supermarket/:supermarketId/pending', auth, ordersController.getPendingOrders); // Récupère les commandes en attente d’un supermarché
+router.get('/user/cart', auth, ordersController.getUserCart); // Récupère le panier de l’utilisateur
+router.get('/user/me', auth, ordersController.getMyOrders); // Récupère les commandes de l’utilisateur
+router.get('/user/history', auth, ordersController.getUserOrderHistory); // Récupère l’historique des commandes
+router.get('/:id', auth, ordersController.getOrderById); // Récupère une commande par ID
+router.put('/:id', auth, ordersController.updateOrder); // Met à jour une commande
+router.put('/:id/status', auth, ordersController.updateOrderStatus); // Met à jour le statut d’une commande
+
+// Route pour ajouter un commentaire à un produit dans une commande
+router.post('/:id/upload-photo', auth, ordersController.uploadPhoto); // Télécharge une photo pour une commande
+
+// Nouvelle route pour ajouter un produit au panier
+router.post('/user/cart', auth, ordersController.addToCart);
 
 // Endpoint de débogage
 router.get('/debug/product/:id', auth, async (req, res) => {

@@ -17,7 +17,7 @@ const productSchema = new mongoose.Schema({
   category: {
     type: String,
     required: true,
-    enum: ['Fruits', 'Légumes', 'Viandes', 'Produits Laitiers', 'Épicerie', 'Boissons', 'Autres', 'Céréales'],
+    enum: ['Fruits', 'Légumes', 'vetements', 'Électronique', 'Viandes', 'Produits Laitiers', 'Épicerie', 'Boissons', 'Autres', 'Céréales'],
   },
   supermarketId: {
     type: mongoose.Schema.Types.ObjectId, // Changer en ObjectId

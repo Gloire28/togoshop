@@ -1,25 +1,38 @@
 const mongoose = require('mongoose');
 
+const productSchema = new mongoose.Schema({
+  productId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Product',
+    required: true,
+  },
+  quantity: {
+    type: Number,
+    required: true,
+    min: 1,
+  },
+  alternativeLocationId: {
+    type: String,
+    default: '',
+  },
+  comment: {
+    type: String,
+    default: '',
+    trim: true,
+    maxlength: [100, 'Le commentaire ne peut pas dépasser 100 caractères'],
+  },
+  photoUrl: {
+    type: String,
+    default: '',
+  },
+});
+
 const orderSchema = new mongoose.Schema({
   clientId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
-    required: false,
+    required: true,
   },
-  products: [{
-    productId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Product',
-      required: false,
-    },
-    quantity: {
-      type: Number,
-      required: false,
-      min: 1,
-    },
-    alternativeLocationId: { 
-      type: String },
-  }],
   supermarketId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Supermarket',
@@ -29,15 +42,17 @@ const orderSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  products: [productSchema],
   deliveryAddress: {
     address: {
       type: String,
-      required: true,
+      required: false,
+      default: '',
     },
     lat: {
       type: Number,
       required: false,
-      default: 6.1725, // Lomé par défaut
+      default: 6.1725,
     },
     lng: {
       type: Number,
@@ -47,7 +62,17 @@ const orderSchema = new mongoose.Schema({
   },
   scheduledDeliveryTime: {
     type: Date,
-    required: true,
+    required: false,
+  },
+  deliveryType: {
+    type: String,
+    enum: ['standard', 'evening', 'store_pickup'],
+    default: 'standard',
+  },
+  comments: {
+    type: String,
+    default: '',
+    trim: true,
   },
   totalAmount: {
     type: Number,
@@ -57,15 +82,23 @@ const orderSchema = new mongoose.Schema({
     type: Number,
     required: true,
   },
-  additionalFees: { 
-    type: Number, 
-    default: 0 
+  additionalFees: {
+    type: Number,
+    default: 0,
   },
-  
+  queuePosition: {
+    type: Number,
+    default: 0,
+  },
+  assignedManager: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Manager',
+    required: false,
+  },
   status: {
     type: String,
-    enum: ['pending_validation', 'awaiting_validator', 'validated', 'in_delivery', 'delivered', 'cancelled'],
-    default: 'pending_validation',
+    enum: ['cart_in_progress', 'pending_validation', 'awaiting_validator', 'validated', 'in_delivery', 'delivered', 'cancelled'],
+    default: 'cart_in_progress', // Statut initial jusqu'à l'adresse choisie
   },
   validatorId: {
     type: mongoose.Schema.Types.ObjectId,

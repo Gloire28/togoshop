@@ -1,0 +1,9 @@
+.DS_Store
+.expo/
+android/
+ios/
+dist/
+cert.pem
+key.pem
+web/
+togoshop-mobile/

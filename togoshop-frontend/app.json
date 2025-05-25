@@ -1,0 +1,39 @@
+{
+  "expo": {
+    "name": "TogoShop Frontend",
+    "slug": "togoshop-frontend",
+    "version": "1.0.0",
+    "sdkVersion": "53.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.togoshop.frontend",
+      "infoPlist": { "NSLocationWhenInUseUsageDescription": "Nous avons besoin de votre position pour afficher votre adresse de livraison sur la carte."}
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-location",
+      "react-native-maps"
+    ],
+    "extra": {
+      "locale": "fr" 
+    }
+  }
+}

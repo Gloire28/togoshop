@@ -9,8 +9,8 @@ router.post('/', auth, productsController.createProduct);
 // Route pour récupérer tous les produits d’un supermarché (publique)
 router.get('/supermarket/:supermarketId', productsController.getProductsBySupermarket);
 
-// Route pour récupérer un produit par ID (publique)
-router.get('/:id', productsController.getProductById);
+// Route pour récupérer un produit par ID (avec authentification)
+router.get('/:id', auth, productsController.getProductById);
 
 // Route pour récupérer les substituts d’un produit (publique)
 router.get('/substitutes/:category/:supermarketId/:locationId', productsController.getSubstitutes);
