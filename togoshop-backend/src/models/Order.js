@@ -59,6 +59,12 @@ const orderSchema = new mongoose.Schema({
       required: false,
       default: 1.2314,
     },
+    instructions: { // Nouveau champ
+      type: String,
+      required: false,
+      default: '',
+      trim: true,
+    },
   },
   scheduledDeliveryTime: {
     type: Date,
@@ -98,7 +104,7 @@ const orderSchema = new mongoose.Schema({
   status: {
     type: String,
     enum: ['cart_in_progress', 'pending_validation', 'awaiting_validator', 'validated', 'in_delivery', 'delivered', 'cancelled'],
-    default: 'cart_in_progress', // Statut initial jusqu'à l'adresse choisie
+    default: 'cart_in_progress',
   },
   validatorId: {
     type: mongoose.Schema.Types.ObjectId,

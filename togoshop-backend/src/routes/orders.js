@@ -5,6 +5,13 @@ const auth = require('../middleware/auth'); // Importation correcte
 const mongoose = require('mongoose');
 const Product = require('../models/Product');
 
+// Middleware de débogage pour toutes les routes
+router.use((req, res, next) => {
+  console.log(`Route appelée: ${req.method} ${req.originalUrl}`);
+  console.log(`Chemin: ${req.path}`);
+  next();
+});
+
 // Routes de gestion des commandes
 router.post('/', auth, ordersController.createOrder); // Crée une nouvelle commande
 router.get('/supermarket/:supermarketId/pending', auth, ordersController.getPendingOrders); // Récupère les commandes en attente d’un supermarché
@@ -20,6 +27,12 @@ router.post('/:id/upload-photo', auth, ordersController.uploadPhoto); // Téléc
 
 // Nouvelle route pour ajouter un produit au panier
 router.post('/user/cart', auth, ordersController.addToCart);
+
+// Route pour soumettre une commande (corrigée : suppression du /orders redondant)
+router.put('/:id/submit', auth, (req, res, next) => {
+  console.log(`Route spécifique /:id/submit appelée avec id: ${req.params.id}`);
+  next();
+}, ordersController.submitOrder);
 
 // Endpoint de débogage
 router.get('/debug/product/:id', auth, async (req, res) => {

@@ -28,8 +28,8 @@ const allowedOrigins = [
   'http://localhost:19006', // Expo Metro Bundler
   'http://localhost:5000', // Backend local
   'http://127.0.0.1:5000', // Alternative localhost
-  'http://192.168.1.65:5000', // IP locale pour appareil physique
-  'exp://192.168.1.65:19000', // Expo Go sur appareil physique
+  'http://192.168.1.81:5000', // IP locale pour appareil physique
+  'exp://192.168.1.81:19000', // Expo Go sur appareil physique
   'http://localhost:8081',
   /^exp:\/\/.+$/, // Regex pour toutes les URLs Expo Go
 ];
@@ -79,13 +79,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// Middleware de débogage
+// Middleware de débogage amélioré
 app.use((req, res, next) => {
   console.log(`\n=== Nouvelle requête ===`);
-  console.log(`Méthode: ${req.method} ${req.path}`);
+  console.log(`Méthode: ${req.method} ${req.originalUrl}`);
+  console.log(`Chemin: ${req.path}`);
+  console.log(`Base URL: ${req.baseUrl}`);
   console.log(`Origine: ${req.headers.origin || 'directe'}`);
   console.log('Headers:', req.headers);
-  // Log supplémentaire pour vérifier req.user après auth
   if (req.user) {
     console.log('req.user après middleware:', req.user);
   }
@@ -123,7 +124,7 @@ app.get('/', (req, res) => {
     <h1>API TogoShop</h1>
     <p>Serveur en fonctionnement</p>
     <p>URL locale: http://localhost:5000/api</p>
-    <p>IP locale: http://192.168.1.65:5000/api</p>
+    <p>IP locale: http://192.168.1.81:5000/api</p>
   `);
 });
 
@@ -141,7 +142,7 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`\n=== SERVEUR DÉMARRÉ SUR LE PORT ${PORT} ===`);
   console.log(`URL locale: http://localhost:${PORT}`);
-  console.log(`IP locale: http://192.168.1.65:${PORT}`);
+  console.log(`IP locale: http://192.168.1.81:${PORT}`);
   console.log(`Environnement: ${process.env.NODE_ENV || 'development'}`);
   console.log('Origines autorisées:', allowedOrigins);
 });

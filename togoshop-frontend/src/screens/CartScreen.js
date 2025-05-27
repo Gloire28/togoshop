@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { AppContext } from '../../context/AppContext';
-import { updateOrder } from '../services/api';
+import { updateOrder, applyPromotion, getUserLoyalty, redeemPoints } from '../services/api';
 import imageMap from '../../assets/imageMap';
 import debounce from 'lodash.debounce';
 
@@ -60,22 +60,27 @@ const ProgressBar = ({ currentStep }) => {
 };
 
 export default function CartScreen({ navigation }) {
-  const { cart, setCart, fetchCart, loadingCart, error } = useContext(AppContext);
+  const { cart, setCart, fetchCart, loadingCart, error, promotions, setPromotions, user } = useContext(AppContext);
   const [orderId, setOrderId] = useState(null);
   const [tempComments, setTempComments] = useState({});
   const [isSaving, setIsSaving] = useState({});
-  const [isUpdating, setIsUpdating] = useState(false); // Nouvel état pour les mises à jour
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [promoCode, setPromoCode] = useState('');
+  const [loyaltyPoints, setLoyaltyPoints] = useState(0);
+  const [usedPoints, setUsedPoints] = useState(0);
+  const [promoApplied, setPromoApplied] = useState(null);
 
   useEffect(() => {
     loadCartData();
+    fetchLoyaltyPoints();
   }, []);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       console.log('CartScreen est actif, rafraîchissement du panier');
       loadCartData();
+      fetchLoyaltyPoints();
     });
-
     return unsubscribe;
   }, [navigation]);
 
@@ -96,9 +101,26 @@ export default function CartScreen({ navigation }) {
     }
   };
 
+  const fetchLoyaltyPoints = async () => {
+    if (user) {
+      try {
+        const data = await getUserLoyalty();
+        setLoyaltyPoints(data.points || 0);
+      } catch (err) {
+        console.log('Erreur lors de la récupération des points de fidélité:', err.message);
+        Alert.alert('Erreur', 'Impossible de charger les points de fidélité');
+      }
+    }
+  };
+
   const calculateSubtotal = useCallback(() => {
-    return cart.reduce((total, item) => total + item.price * item.quantity, 0);
-  }, [cart]);
+    const baseTotal = cart.reduce((total, item) => total + item.price * item.quantity, 0);
+    const promoDiscount = promoApplied ? (promoApplied.discountType === 'percentage' 
+      ? (baseTotal * promoApplied.discountValue) / 100 
+      : promoApplied.discountValue) : 0;
+    const pointsDiscount = usedPoints * 10; // 10 FCFA par point (à ajuster selon backend)
+    return Math.max(0, baseTotal - promoDiscount - pointsDiscount);
+  }, [cart, promoApplied, usedPoints]);
 
   const debouncedFetchCart = debounce(async () => {
     try {
@@ -113,101 +135,66 @@ export default function CartScreen({ navigation }) {
   }, 1000);
 
   const updateQuantity = async (productId, newQuantity) => {
-    console.log('Vérification de setCart dans updateQuantity:', !!setCart);
     if (newQuantity < 1 || !orderId) return;
-
     try {
-      const updatedCart = cart.map(item =>
-        item.productId === productId ? { ...item, quantity: newQuantity } : item
-      );
+      const updatedCart = cart.map(item => item.productId === productId ? { ...item, quantity: newQuantity } : item);
       setCart(updatedCart);
-
       setIsSaving(prev => ({ ...prev, [productId]: true }));
-      setIsUpdating(true); // Active le chargement local
+      setIsUpdating(true);
       const updatedProducts = updatedCart.map(item => ({
         productId: item.productId,
         quantity: item.quantity,
         comment: item.comment || '',
         alternativeLocationId: item.alternativeLocationId || '',
       }));
-      console.log('Préparation de updateOrder pour quantité - updatedProducts:', updatedProducts);
-      console.log('Appel à updateOrder pour quantité:', { orderId, products: updatedProducts });
       await updateOrder(orderId, { products: updatedProducts });
-      console.log('updateOrder réussi pour quantité - Réponse attendue:', 'Vérifier si la réponse contient des données');
-      console.log('Préparation de debouncedFetchCart après update');
       debouncedFetchCart();
-      console.log('debouncedFetchCart appelé, attente de 1s avant exécution');
     } catch (err) {
-      console.log('Erreur capturée dans updateQuantity avant affichage:', err);
       console.log('Erreur dans updateQuantity:', err.message);
       Alert.alert('Erreur', 'Impossible de mettre à jour la quantité : ' + err.message);
-      console.log('Appel à fetchCart après erreur pour récupération');
       await fetchCart();
-      console.log('fetchCart appelé après erreur, état devrait être rechargé');
     } finally {
       setIsSaving(prev => ({ ...prev, [productId]: false }));
-      setIsUpdating(false); // Désactive le chargement local
+      setIsUpdating(false);
     }
   };
 
   const removeFromCart = async (productId) => {
     if (!orderId) return;
-
-    Alert.alert(
-      'Confirmer la suppression',
-      'Voulez-vous supprimer ce produit du panier ?',
-      [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: 'Supprimer',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const updatedCart = cart.filter(item => item.productId !== productId);
-              setCart(updatedCart);
-
-              setIsUpdating(true); // Active le chargement local
-              const updatedProducts = updatedCart.map(item => ({
-                productId: item.productId,
-                quantity: item.quantity,
-                comment: item.comment || '',
-                alternativeLocationId: item.alternativeLocationId || '',
-              }));
-              console.log('Préparation de updateOrder pour suppression - updatedProducts:', updatedProducts);
-              console.log('Appel à updateOrder pour suppression:', { orderId, products: updatedProducts });
-              await updateOrder(orderId, { products: updatedProducts });
-              console.log('updateOrder réussi pour suppression - Réponse attendue:', 'Vérifier si la réponse contient des données');
-              console.log('Préparation de debouncedFetchCart après suppression');
-              debouncedFetchCart();
-              console.log('debouncedFetchCart appelé, attente de 1s avant exécution');
-            } catch (err) {
-              console.log('Erreur capturée dans removeFromCart avant affichage:', err);
-              console.log('Erreur dans removeFromCart:', err.message);
-              Alert.alert('Erreur', 'Impossible de supprimer le produit : ' + err.message);
-              console.log('Appel à fetchCart après erreur pour récupération');
-              await fetchCart();
-              console.log('fetchCart appelé après erreur, état devrait être rechargé');
-            } finally {
-              setIsUpdating(false); // Désactive le chargement local
-            }
-          },
-        },
-      ]
-    );
+    Alert.alert('Confirmer la suppression', 'Voulez-vous supprimer ce produit du panier ?', [
+      { text: 'Annuler', style: 'cancel' },
+      { text: 'Supprimer', style: 'destructive', onPress: async () => {
+        try {
+          const updatedCart = cart.filter(item => item.productId !== productId);
+          setCart(updatedCart);
+          setIsUpdating(true);
+          const updatedProducts = updatedCart.map(item => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            comment: item.comment || '',
+            alternativeLocationId: item.alternativeLocationId || '',
+          }));
+          await updateOrder(orderId, { products: updatedProducts });
+          debouncedFetchCart();
+        } catch (err) {
+          console.log('Erreur dans removeFromCart:', err.message);
+          Alert.alert('Erreur', 'Impossible de supprimer le produit : ' + err.message);
+          await fetchCart();
+        } finally {
+          setIsUpdating(false);
+        }
+      }},
+    ]);
   };
 
   const updateComment = async (productId, newComment) => {
     if (!orderId) return;
-
     try {
       setTempComments(prev => ({ ...prev, [productId]: newComment }));
-      const updatedCart = cart.map(item =>
-        item.productId === productId ? { ...item, comment: newComment } : item
-      );
+      const updatedCart = cart.map(item => item.productId === productId ? { ...item, comment: newComment } : item);
       setCart(updatedCart);
-
       setIsSaving(prev => ({ ...prev, [productId]: true }));
-      setIsUpdating(true); // Active le chargement local
+      setIsUpdating(true);
       const updatedProducts = updatedCart.map(item => ({
         productId: item.productId,
         quantity: item.quantity,
@@ -215,24 +202,50 @@ export default function CartScreen({ navigation }) {
         comment: item.comment || '',
         photoUrl: item.photoUrl || '',
       }));
-      console.log('Préparation de updateOrder pour commentaire - updatedProducts:', updatedProducts);
-      console.log('Appel à updateOrder pour commentaire:', { orderId, products: updatedProducts });
       await updateOrder(orderId, { products: updatedProducts });
-      console.log('updateOrder réussi pour commentaire - Réponse attendue:', 'Vérifier si la réponse contient des données');
-      console.log('Préparation de debouncedFetchCart après commentaire');
       debouncedFetchCart();
-      console.log('debouncedFetchCart appelé, attente de 1s avant exécution');
     } catch (err) {
-      console.log('Erreur capturée dans updateComment avant affichage:', err);
       console.log('Erreur dans updateComment:', err.message);
       setTempComments(prev => ({ ...prev, [productId]: '' }));
       Alert.alert('Erreur', 'Impossible de mettre à jour le commentaire : ' + err.message);
-      console.log('Appel à fetchCart après erreur pour récupération');
       await fetchCart();
-      console.log('fetchCart appelé après erreur, état devrait être rechargé');
     } finally {
       setIsSaving(prev => ({ ...prev, [productId]: false }));
-      setIsUpdating(false); // Désactive le chargement local
+      setIsUpdating(false);
+    }
+  };
+
+  const handleApplyPromo = async () => {
+    if (!orderId || !promoCode) {
+      Alert.alert('Erreur', 'Veuillez entrer un code promo et avoir un panier valide.');
+      return;
+    }
+    try {
+      const response = await applyPromotion(promoCode, orderId);
+      setPromoApplied(response.promotion);
+      Alert.alert('Succès', `Promotion ${promoCode} appliquée avec succès ! Réduction de ${response.promotion.discountValue}${response.promotion.discountType === 'percentage' ? '%' : ' FCFA'}`);
+      setPromoCode('');
+      await fetchCart(); // Rafraîchir le panier après application
+    } catch (err) {
+      console.log('Erreur dans handleApplyPromo:', err.message);
+      Alert.alert('Erreur', err.message || 'Code promo invalide ou erreur d\'application');
+    }
+  };
+
+  const handleRedeemPoints = async () => {
+    if (!orderId || usedPoints <= 0 || usedPoints > loyaltyPoints) {
+      Alert.alert('Erreur', 'Vérifiez vos points disponibles et entrez une valeur valide.');
+      return;
+    }
+    try {
+      await redeemPoints(usedPoints, orderId);
+      setLoyaltyPoints(prev => prev - usedPoints);
+      setUsedPoints(0);
+      Alert.alert('Succès', `${usedPoints} points utilisés avec succès !`);
+      await fetchCart(); // Rafraîchir le panier après utilisation
+    } catch (err) {
+      console.log('Erreur dans handleRedeemPoints:', err.message);
+      Alert.alert('Erreur', err.message || 'Erreur lors de l\'utilisation des points');
     }
   };
 
@@ -246,7 +259,6 @@ export default function CartScreen({ navigation }) {
 
   const renderCartItem = ({ item }) => {
     const imageSource = imageMap[item.productId] || null;
-    console.log('Rendu de l\'item:', item);
     return (
       <View style={styles.cartItem}>
         <View style={styles.itemImageContainer}>
@@ -262,28 +274,14 @@ export default function CartScreen({ navigation }) {
           <Text style={styles.itemName}>{item.name}</Text>
           <Text style={styles.itemPrice}>{item.price * item.quantity} FCFA</Text>
           <View style={styles.quantityContainer}>
-            <TouchableOpacity
-              onPress={() => {
-                console.log('Clic sur "-" pour productId:', item.productId, 'Quantité actuelle:', item.quantity);
-                updateQuantity(item.productId, item.quantity - 1);
-              }}
-              style={styles.quantityButton}
-            >
+            <TouchableOpacity onPress={() => updateQuantity(item.productId, item.quantity - 1)} style={styles.quantityButton}>
               <Text style={styles.quantityButtonText}>−</Text>
             </TouchableOpacity>
             <Text style={styles.quantityText}>{item.quantity}</Text>
-            <TouchableOpacity
-              onPress={() => {
-                console.log('Clic sur "+" pour productId:', item.productId, 'Quantité actuelle:', item.quantity);
-                updateQuantity(item.productId, item.quantity + 1);
-              }}
-              style={styles.quantityButton}
-            >
+            <TouchableOpacity onPress={() => updateQuantity(item.productId, item.quantity + 1)} style={styles.quantityButton}>
               <Text style={styles.quantityButtonText}>+</Text>
             </TouchableOpacity>
-            {isSaving[item.productId] && (
-              <Ionicons name="checkmark-circle-outline" size={20} color="#28a745" style={styles.savingIcon} />
-            )}
+            {isSaving[item.productId] && <Ionicons name="checkmark-circle-outline" size={20} color="#28a745" style={styles.savingIcon} />}
           </View>
           <View style={styles.commentContainer}>
             <TextInput
@@ -293,23 +291,11 @@ export default function CartScreen({ navigation }) {
               onChangeText={(text) => setTempComments({ ...tempComments, [item.productId]: text })}
               maxLength={100}
             />
-            <TouchableOpacity
-              onPress={() => {
-                console.log('Clic sur sauvegarde commentaire pour productId:', item.productId, 'Commentaire:', tempComments[item.productId] || '');
-                updateComment(item.productId, tempComments[item.productId] || '');
-              }}
-              style={styles.saveButton}
-            >
+            <TouchableOpacity onPress={() => updateComment(item.productId, tempComments[item.productId] || '')} style={styles.saveButton}>
               <Ionicons name="checkmark-circle-outline" size={20} color="#28a745" />
             </TouchableOpacity>
           </View>
-          <TouchableOpacity
-            onPress={() => {
-              console.log('Clic sur suppression pour productId:', item.productId);
-              removeFromCart(item.productId);
-            }}
-            style={styles.deleteButton}
-          >
+          <TouchableOpacity onPress={() => removeFromCart(item.productId)} style={styles.deleteButton}>
             <Ionicons name="trash-outline" size={20} color="#ff4d4f" />
           </TouchableOpacity>
         </View>
@@ -325,6 +311,32 @@ export default function CartScreen({ navigation }) {
   const renderSummary = () => {
     return (
       <View style={styles.summaryContainer}>
+        {/* Champ pour le code promo */}
+        <View style={styles.promoContainer}>
+          <TextInput
+            style={styles.promoInput}
+            placeholder="Entrez un code promo"
+            value={promoCode}
+            onChangeText={setPromoCode}
+          />
+          <TouchableOpacity style={styles.promoButton} onPress={handleApplyPromo}>
+            <Text style={styles.promoButtonText}>Appliquer</Text>
+          </TouchableOpacity>
+        </View>
+        {/* Section pour les points de fidélité */}
+        <View style={styles.loyaltyContainer}>
+          <Text style={styles.loyaltyText}>Points disponibles : {loyaltyPoints}</Text>
+          <TextInput
+            style={styles.pointsInput}
+            placeholder="Points à utiliser"
+            value={usedPoints ? usedPoints.toString() : ''}
+            onChangeText={(text) => setUsedPoints(parseInt(text) || 0)}
+            keyboardType="numeric"
+          />
+          <TouchableOpacity style={styles.loyaltyButton} onPress={handleRedeemPoints}>
+            <Text style={styles.loyaltyButtonText}>Utiliser</Text>
+          </TouchableOpacity>
+        </View>
         <TouchableOpacity
           style={[styles.checkoutButton, { opacity: cart.length === 0 ? 0.5 : 1 }]}
           onPress={handleProceedToDelivery}
@@ -524,6 +536,61 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#ddd',
     elevation: 2,
+  },
+  promoContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  promoInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 5,
+    padding: 8,
+    fontSize: 14,
+    marginRight: 10,
+  },
+  promoButton: {
+    backgroundColor: '#28a745',
+    padding: 10,
+    borderRadius: 5,
+    alignItems: 'center',
+  },
+  promoButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  loyaltyContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  loyaltyText: {
+    fontSize: 14,
+    color: '#333',
+    marginRight: 10,
+  },
+  pointsInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 5,
+    padding: 8,
+    fontSize: 14,
+    width: 100,
+    marginRight: 10,
+  },
+  loyaltyButton: {
+    backgroundColor: '#28a745',
+    padding: 10,
+    borderRadius: 5,
+    alignItems: 'center',
+  },
+  loyaltyButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
   checkoutButton: {
     backgroundColor: '#28a745',

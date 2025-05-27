@@ -1,3 +1,4 @@
+// AppContext.js
 import React, { createContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
@@ -99,7 +100,7 @@ export const AppProvider = ({ children }) => {
           photoUrl: item.photoUrl || '',
         }));
         console.log('Cart après mapping:', mappedCart);
-        setCart(mappedCart); // Assure que setCart est utilisé ici
+        setCart(mappedCart);
         console.log('Cart mis à jour dans l\'état:', mappedCart);
         setError(null);
         return { orderId: response._id, cart: mappedCart };
@@ -193,7 +194,7 @@ export const AppProvider = ({ children }) => {
     <AppContext.Provider
       value={{
         cart,
-        setCart, // Assuré que setCart est explicitement passé
+        setCart,
         setCartFromAPI,
         addToCart,
         removeFromCart,
@@ -203,6 +204,7 @@ export const AppProvider = ({ children }) => {
         user,
         setUser,
         promotions,
+        setPromotions, // Ajout de setPromotions ici pour corriger l'erreur
         loadingCart,
         error,
         fetchCart,

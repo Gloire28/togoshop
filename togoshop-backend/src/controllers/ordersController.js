@@ -365,38 +365,46 @@ exports.getPendingOrders = async (req, res) => {
 exports.getUserCart = async (req, res) => {
   try {
     const userId = req.user.id;
-    console.log(`Récupération du panier pour utilisateur ${userId}`);
 
+    // Recherche uniquement les commandes en 'cart_in_progress'
     let order = await Order.findOne({
       clientId: userId,
-      status: { $in: ['pending_validation', 'awaiting_validator', 'cart_in_progress'] },
+      status: 'cart_in_progress', // Filtre strict sur cart_in_progress
     })
-      .sort({ updatedAt: -1 })
-      .populate('products.productId')
-      .populate('supermarketId');
+      .sort({ updatedAt: -1 }) // Trie par date de mise à jour décroissante
+      .populate({
+        path: 'products.productId',
+        select: 'name price stockByLocation weight', // Sélectionner uniquement les champs nécessaires
+      })
+      .populate({
+        path: 'supermarketId',
+        select: 'name locations', // Sélectionner uniquement les champs nécessaires
+      })
+      .lean(); // Utiliser .lean() pour des performances accrues (retourne un objet JS simple)
 
-    console.log('Commande trouvée avant retour:', order);
     if (!order) {
-      console.log(`Aucune commande en cours trouvée pour utilisateur ${userId}`);
-      return res.status(200).json({ message: 'Aucune commande en cours', order: null });
+      return res.status(200).json({ message: 'Aucune commande dans le panier', order: null });
     }
 
-    // Recalculer totalAmount pour corriger les erreurs
+    // Vérifier et recalculer totalAmount si nécessaire
     const calculatedTotal = order.products.reduce((total, item) => {
-      const productPrice = item.productId.price || 0;
-      return total + (item.quantity * productPrice);
+      const productPrice = item.productId?.price || 0;
+      return total + item.quantity * productPrice;
     }, 0);
+
     if (order.totalAmount !== calculatedTotal) {
-      console.log(`Correction totalAmount: ${order.totalAmount} -> ${calculatedTotal}`);
       order.totalAmount = calculatedTotal;
-      await order.save();
+      // Mettre à jour uniquement si nécessaire
+      await Order.updateOne(
+        { _id: order._id },
+        { $set: { totalAmount: calculatedTotal, updatedAt: new Date() } }
+      );
     }
 
-    console.log('Commande prête à être renvoyée dans getUserCart:', order);
     res.status(200).json(order);
   } catch (error) {
     console.error('Erreur lors de la récupération du panier:', error.message);
-    res.status(500).json({ message: 'Erreur lors de la récupération du panier', error: error.message });
+    res.status(500).json({ message: 'Erreur serveur lors de la récupération du panier', error: error.message });
   }
 };
 
@@ -478,7 +486,7 @@ exports.getMyOrders = async (req, res) => {
 exports.updateOrder = async (req, res) => {
   try {
     const { id } = req.params;
-    const { products } = req.body;
+    const { products, deliveryAddress } = req.body;
 
     console.log(`Mise à jour de la commande ${id} avec req.body:`, JSON.stringify(req.body));
 
@@ -618,9 +626,25 @@ exports.updateOrder = async (req, res) => {
       });
     }
 
+    // Mettre à jour deliveryAddress si fourni
+    if (deliveryAddress) {
+      order.deliveryAddress = {
+        address: deliveryAddress.address || order.deliveryAddress.address,
+        lat: deliveryAddress.lat || order.deliveryAddress.lat,
+        lng: deliveryAddress.lng || order.deliveryAddress.lng,
+        instructions: deliveryAddress.instructions || order.deliveryAddress.instructions,
+      };
+      console.log(`deliveryAddress mis à jour:`, order.deliveryAddress);
+    }
+
     let deliveryFee = order.deliveryFee;
     if (order.deliveryType !== 'evening') {
-      const distance = calculateDistance(location.latitude, location.longitude, order.deliveryAddress.lat || 6.1725, order.deliveryAddress.lng || 1.2314);
+      const distance = calculateDistance(
+        location.latitude,
+        location.longitude,
+        order.deliveryAddress.lat || 6.1725,
+        order.deliveryAddress.lng || 1.2314
+      );
       const distanceFee = distance > 5 ? (distance - 5) * 100 : 0;
       const weightFee = totalWeight > 5 ? (totalWeight - 5) * 50 : 0;
       deliveryFee = 500 + distanceFee + weightFee;
@@ -642,7 +666,6 @@ exports.updateOrder = async (req, res) => {
     res.status(500).json({ message: 'Erreur lors de la mise à jour de la commande', error: error.message });
   }
 };
-
 
 exports.updateOrderStatus = async (req, res) => {
   try {
@@ -876,5 +899,69 @@ exports.uploadPhoto = async (req, res) => {
   } catch (error) {
     console.error('Erreur lors de la mise à jour de la commande:', error.message);
     res.status(500).json({ message: 'Erreur lors de la mise à jour de la commande', error: error.message });
+  }
+};
+
+// Soumettre une commande existante au supermarché
+exports.submitOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const order = await Order.findById(id);
+    if (!order) {
+      console.log(`Commande non trouvée pour _id ${id}`);
+      return res.status(404).json({ message: 'Commande non trouvée' });
+    }
+
+    if (order.clientId.toString() !== req.user.id) {
+      console.log(`Utilisateur ${req.user.id} non autorisé à soumettre la commande ${id}`);
+      return res.status(403).json({ message: 'Non autorisé à soumettre cette commande' });
+    }
+
+    if (order.status !== 'cart_in_progress') {
+      console.log(`Commande ${id} n’est pas en cart_in_progress, statut actuel: ${order.status}`);
+      return res.status(400).json({ message: 'La commande doit être en cart_in_progress pour être soumise' });
+    }
+
+    // Calculer la position dans la file d'attente
+    const pendingOrders = await Order.countDocuments({
+      supermarketId: order.supermarketId,
+      locationId: order.locationId,
+      status: { $in: ['pending_validation', 'awaiting_validator'] },
+    });
+    const queuePosition = pendingOrders + 1;
+    console.log(`Position dans la file d'attente: ${queuePosition}`);
+
+    // Tenter d'assigner un manager
+    let assignedManager = null;
+    try {
+      assignedManager = await assignManager(String(order.supermarketId), String(order.locationId));
+      console.log('Validateur assigné:', assignedManager);
+    } catch (error) {
+      console.log('Aucun validateur disponible, commande en attente:', error.message);
+    }
+
+    const newStatus = assignedManager ? 'pending_validation' : 'awaiting_validator';
+    order.status = newStatus;
+    order.queuePosition = queuePosition;
+    order.assignedManager = assignedManager || null;
+    await order.save();
+
+    // Notifier le client
+    await sendNotification(
+      order.clientId,
+      `Votre commande (ID: ${order._id}) a été soumise. Position dans la file : ${queuePosition}. Statut : ${newStatus}`
+    );
+    console.log(`Notification envoyée au client ${order.clientId}`);
+
+    // Notifier le manager si assigné
+    if (assignedManager) {
+      await sendNotification(assignedManager, `Nouvelle commande (ID: ${order._id}) à valider.`);
+      console.log(`Notification envoyée au manager ${assignedManager}`);
+    }
+
+    res.status(200).json({ success: true, order });
+  } catch (error) {
+    console.error('Erreur lors de la soumission de la commande:', error.message);
+    res.status(500).json({ message: 'Erreur lors de la soumission de la commande', error: error.message });
   }
 };
