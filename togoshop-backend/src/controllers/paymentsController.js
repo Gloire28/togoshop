@@ -1,78 +1,100 @@
 const Payment = require('../models/Payment');
 const Order = require('../models/Order');
 const Wallet = require('../models/Wallet');
-const { processExternalPayment } = require('../services/paymentGateway');
 const { sendNotification } = require('../services/notifications');
 
 // Méthodes de paiement autorisées
-const ALLOWED_PAYMENT_METHODS = ['Flooz', 'TMoney', 'wallet'];
+const ALLOWED_PAYMENT_METHODS = ['Flooz', 'TMoney', 'wallet', 'cash'];
 
-// Créer un nouveau paiement
-exports.createPayment = async (req, res) => {
+// Simuler un paiement externe (à remplacer par une vraie API)
+const processExternalPayment = async (method, amount, clientPhone) => {
+  return { success: true, message: `Paiement simulé avec ${method} pour ${amount} FCFA` };
+};
+
+exports.createPayment = async (orderId, method, clientPhone, user) => {
   try {
-    const { orderId, method, clientPhone } = req.body;
+    // Ajouter des logs pour déboguer
+    console.log('createPayment - Début');
+    console.log('createPayment - orderId:', orderId);
+    console.log('createPayment - method:', method);
+    console.log('createPayment - clientPhone:', clientPhone);
+    console.log('createPayment - user:', JSON.stringify(user));
 
     // Vérifier les champs
     if (!orderId || !method) {
-      return res.status(400).json({ message: 'ID de la commande et méthode de paiement requis' });
+      throw new Error('ID de la commande et méthode de paiement requis');
     }
 
-    if (method !== 'wallet' && !clientPhone) {
-      return res.status(400).json({ message: 'Numéro de téléphone requis pour les paiements Flooz/TMoney' });
+    if (method !== 'cash' && !clientPhone && method !== 'wallet') {
+      throw new Error('Numéro de téléphone requis pour les paiements Flooz/TMoney');
     }
 
     // Valider la méthode de paiement
     if (!ALLOWED_PAYMENT_METHODS.includes(method)) {
-      return res.status(400).json({ message: `Méthode de paiement non supportée. Méthodes autorisées : ${ALLOWED_PAYMENT_METHODS.join(', ')}` });
+      throw new Error(`Méthode de paiement non supportée. Méthodes autorisées : ${ALLOWED_PAYMENT_METHODS.join(', ')}`);
     }
 
     // Trouver la commande
-    const order = await Order.findById(orderId);
+    const order = await Order.findById(orderId).populate('clientId');
     if (!order) {
-      return res.status(404).json({ message: 'Commande non trouvée' });
+      throw new Error('Commande non trouvée');
     }
 
+    // Déboguer la valeur de clientId après populate
+    console.log('createPayment - order.clientId (après populate):', order.clientId);
+    console.log('createPayment - order.clientId type:', typeof order.clientId);
+
     // Vérifier que l’utilisateur est le client de la commande
-    if (req.user.role !== 'admin' && order.clientId.toString() !== req.user.id) {
-      return res.status(403).json({ message: 'Accès non autorisé' });
+    let clientIdToCompare;
+    if (typeof order.clientId === 'object' && order.clientId._id) {
+      // Si clientId est populé, c'est un objet avec un champ _id
+      clientIdToCompare = order.clientId._id.toString();
+    } else {
+      // Sinon, c'est un ObjectId brut
+      clientIdToCompare = order.clientId.toString();
+    }
+
+    console.log('createPayment - clientIdToCompare:', clientIdToCompare);
+    console.log('createPayment - user.id:', user.id);
+
+    if (user.role !== 'admin' && clientIdToCompare !== user.id.toString()) {
+      console.log('Accès refusé - Comparaison:', clientIdToCompare, 'vs', user.id.toString());
+      throw new Error('Accès non autorisé');
     }
 
     // Vérifier que la commande n’a pas déjà un paiement terminé
     const existingPayment = await Payment.findOne({ orderId });
     if (existingPayment && existingPayment.status === 'completed') {
-      return res.status(400).json({ message: 'Cette commande a déjà été payée' });
+      throw new Error('Cette commande a déjà été payée');
     }
 
-    // Calculer le montant
-    const amount = order.totalAmount + order.deliveryFee;
+    // Utiliser le totalAmount calculé dans l'ordre
+    const amount = order.totalAmount;
+    console.log('createPayment - amount:', amount);
 
     // Créer le paiement
     const payment = new Payment({
       orderId,
-      clientId: order.clientId,
+      clientId: order.clientId._id || order.clientId, // S'assurer de stocker l'ObjectId brut
       amount,
       method,
       status: 'pending',
       transactionId: `TX-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      clientPhone: method !== 'cash' && method !== 'wallet' ? clientPhone : undefined,
     });
-    try {
-      await payment.save();
-      console.log('Paiement sauvegardé avec succès dans createPayment, _id:', payment._id);
-    } catch (error) {
-      console.error('Erreur lors de la sauvegarde du paiement dans createPayment:', error.message);
-      throw error;
-    }
+    await payment.save();
+    console.log('Paiement sauvegardé avec succès dans createPayment, _id:', payment._id);
 
     // Gestion du paiement selon la méthode
     if (method === 'wallet') {
       // Vérifier et déduire du portefeuille
-      let wallet = await Wallet.findOne({ clientId: req.user.id });
+      let wallet = await Wallet.findOne({ clientId: order.clientId._id || order.clientId });
       if (!wallet) {
-        return res.status(400).json({ message: 'Portefeuille non trouvé. Veuillez d’abord effectuer un dépôt.' });
+        wallet = new Wallet({ clientId: order.clientId._id || order.clientId, balance: 0 });
       }
 
       if (wallet.balance < amount) {
-        return res.status(400).json({ message: 'Solde insuffisant dans le portefeuille' });
+        throw new Error('Solde insuffisant dans le portefeuille');
       }
 
       wallet.balance -= amount;
@@ -86,19 +108,25 @@ exports.createPayment = async (req, res) => {
       payment.status = 'completed';
       await payment.save();
 
-      await sendNotification(order.clientId, 'Votre paiement a été effectué avec succès');
+      await sendNotification(order.clientId._id || order.clientId, 'Votre paiement a été effectué avec succès');
+    } else if (method === 'cash') {
+      payment.status = 'completed';
+      await payment.save();
+      await sendNotification(order.clientId._id || order.clientId, 'Paiement en espèces enregistré avec succès');
     } else {
-      // Utiliser le service pour les paiements externes
-      const result = { success: true, message: 'Paiement simulé avec succès' };
-      console.log('Paiement simulé pour orderId:', payment.orderId);
+      // Paiement externe (Flooz/TMoney)
+      const result = await processExternalPayment(method, amount, clientPhone);
       if (!result.success) {
-        return res.status(400).json({ message: result.message });
+        throw new Error(result.message);
       }
+      payment.status = 'pending'; // À confirmer via callback API
+      await payment.save();
     }
 
-    res.status(201).json({ message: 'Paiement créé avec succès', payment });
+    return { paymentId: payment._id, status: payment.status };
   } catch (error) {
-    res.status(500).json({ message: 'Erreur lors de la création du paiement', error: error.message });
+    console.error('Erreur lors de la création du paiement dans createPayment:', error.message);
+    throw error;
   }
 };
 
@@ -133,7 +161,7 @@ exports.refundPayment = async (req, res) => {
       return res.status(403).json({ message: 'Accès réservé à l’administrateur ou au validateur' });
     }
 
-    const payment = await Payment.findById(paymentId);
+    const payment = await Payment.findById(paymentId).populate('orderId');
     if (!payment) {
       return res.status(404).json({ message: 'Paiement non trouvé' });
     }
@@ -145,7 +173,7 @@ exports.refundPayment = async (req, res) => {
     // Rembourser via le portefeuille
     let wallet = await Wallet.findOne({ clientId: payment.clientId });
     if (!wallet) {
-      wallet = new Wallet({ clientId: payment.clientId });
+      wallet = new Wallet({ clientId: payment.clientId, balance: 0 });
     }
 
     wallet.balance += payment.amount;

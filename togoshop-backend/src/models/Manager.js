@@ -24,7 +24,7 @@ const managerSchema = new mongoose.Schema({
     required: true,
   },
   locationId: {
-    type: String, // ID du site spécifique
+    type: String,
     required: true,
   },
   roles: { 
@@ -39,6 +39,10 @@ const managerSchema = new mongoose.Schema({
       message: 'Un manager doit avoir exactement les rôles "order_validator" et "stock_manager".'
     }
   },
+  isAvailable: { // Nouveau champ
+    type: Boolean,
+    default: true,
+  },
   createdAt: {
     type: Date,
     default: Date.now,
@@ -49,7 +53,6 @@ const managerSchema = new mongoose.Schema({
   },
 });
 
-// Hachage du mot de passe avant sauvegarde
 managerSchema.pre('save', async function(next) {
   if (this.isModified('password')) {
     this.password = await bcrypt.hash(this.password, 10);

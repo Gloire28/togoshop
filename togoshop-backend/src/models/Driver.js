@@ -36,6 +36,10 @@ const driverSchema = new mongoose.Schema({
     enum: ['available', 'busy', 'offline'],
     default: 'offline',
   },
+  isDiscoverable: {
+    type: Boolean,
+    default: false,
+  },
   earnings: {
     type: Number,
     default: 0,

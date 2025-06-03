@@ -17,12 +17,12 @@ const productSchema = new mongoose.Schema({
   category: {
     type: String,
     required: true,
-    enum: ['Fruits', 'Légumes', 'vetements', 'Électronique', 'Viandes', 'Produits Laitiers', 'Épicerie', 'Boissons', 'Autres', 'Céréales'],
+    enum: ['Fruits', 'Légumes', 'Vêtements', 'Électronique', 'Viandes', 'Produits Laitiers', 'Épicerie', 'Boissons', 'Autres', 'Céréales'],
   },
   supermarketId: {
-    type: mongoose.Schema.Types.ObjectId, // Changer en ObjectId
+    type: mongoose.Schema.Types.ObjectId, 
     required: true,
-    ref: 'Supermarket' // Optionnel : ajouter une référence si le modèle Supermarket existe
+    ref: 'Supermarket' 
   },
   stockByLocation: [{
     locationId: {

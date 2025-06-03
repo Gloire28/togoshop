@@ -14,6 +14,8 @@ const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
 const notificationRoutes = require('./routes/notifications');
 const loyaltyRoutes = require('./routes/loyalty');
+const { autoAssignDrivers } = require('./services/optimizer');
+const multer = require('multer');
 
 const app = express();
 
@@ -23,15 +25,19 @@ connectDB();
 // Middleware pour parser les requêtes JSON
 app.use(express.json());
 
+// Configuration de multer pour parser multipart/form-data (globalement)
+const upload = multer({ storage: multer.memoryStorage() });
+app.use(upload.any()); // Appliqué à toutes les routes (peut être restreint si nécessaire)
+
 // Liste des origines autorisées
 const allowedOrigins = [
-  'http://localhost:19006', // Expo Metro Bundler
-  'http://localhost:5000', // Backend local
-  'http://127.0.0.1:5000', // Alternative localhost
-  'http://192.168.1.81:5000', // IP locale pour appareil physique
-  'exp://192.168.1.81:19000', // Expo Go sur appareil physique
+  'http://localhost:19006',
+  'http://localhost:5000',
+  'http://127.0.0.1:5000',
+  'http://192.168.1.74:5000',
+  'exp://192.168.1.74:19000',
   'http://localhost:8081',
-  /^exp:\/\/.+$/, // Regex pour toutes les URLs Expo Go
+  /^exp:\/\/.+$/,
 ];
 
 // Configuration CORS
@@ -48,40 +54,21 @@ const corsOptions = {
     if (isAllowed) {
       callback(null, true);
     } else {
-      console.log(`CORS bloqué pour l'origine: ${origin}`);
+      console.log(`Origine bloquée par CORS: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'X-Requested-With',
-  ],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   exposedHeaders: ['Authorization'],
 };
 
-// Appliquer la configuration CORS
 app.use(cors(corsOptions));
-
-// Middleware pour les headers CORS (sécurité supplémentaire)
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (allowedOrigins.some(allowedOrigin => {
-    if (typeof allowedOrigin === 'string') return origin === allowedOrigin;
-    return allowedOrigin.test(origin);
-  })) {
-    res.header('Access-Control-Allow-Origin', origin);
-    res.header('Access-Control-Allow-Credentials', 'true');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-  }
-  next();
-});
 
 // Middleware de débogage amélioré
 app.use((req, res, next) => {
-  console.log(`\n=== Nouvelle requête ===`);
+  console.log('\n=== Nouvelle requête ===');
   console.log(`Méthode: ${req.method} ${req.originalUrl}`);
   console.log(`Chemin: ${req.path}`);
   console.log(`Base URL: ${req.baseUrl}`);
@@ -124,25 +111,43 @@ app.get('/', (req, res) => {
     <h1>API TogoShop</h1>
     <p>Serveur en fonctionnement</p>
     <p>URL locale: http://localhost:5000/api</p>
-    <p>IP locale: http://192.168.1.81:5000/api</p>
+    <p>IP locale: http://192.168.1.74:5000/api</p>
   `);
 });
 
-// Gestion des erreurs
+// Middleware pour gérer les routes non trouvées
+app.use((req, res, next) => {
+  res.status(404).json({ message: 'Route non trouvée' });
+});
+
+// Middleware de gestion des erreurs amélioré
 app.use((err, req, res, next) => {
   console.error('Erreur:', err.stack);
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({ message: 'Accès interdit par CORS' });
+  }
   res.status(500).json({
     error: err.message || 'Erreur serveur',
     details: process.env.NODE_ENV === 'development' ? err.stack : undefined,
   });
 });
 
+// Exécuter autoAssignDrivers toutes les 5 minutes
+setInterval(async () => {
+  try {
+    await autoAssignDrivers();
+    console.log('Auto-assignation des livreurs effectuée');
+  } catch (error) {
+    console.error('Erreur lors de l’auto-assignation des livreurs:', error.message);
+  }
+}, 5 * 60 * 1000); // 5 minutes
+
 // Démarrer le serveur
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`\n=== SERVEUR DÉMARRÉ SUR LE PORT ${PORT} ===`);
+  console.log('\n=== SERVEUR DÉMARRÉ SUR LE PORT', PORT, '===');
   console.log(`URL locale: http://localhost:${PORT}`);
-  console.log(`IP locale: http://192.168.1.81:${PORT}`);
+  console.log(`IP locale: http://192.168.1.74:${PORT}`);
   console.log(`Environnement: ${process.env.NODE_ENV || 'development'}`);
   console.log('Origines autorisées:', allowedOrigins);
 });

@@ -69,3 +69,29 @@ exports.getManager = async (req, res) => {
     res.status(500).json({ message: 'Erreur lors de la récupération des informations', error: error.message });
   }
 };
+
+exports.updateAvailability = async (req, res) => {
+  try {
+    const { isAvailable } = req.body;
+    if (!req.body || typeof isAvailable !== 'boolean') {
+      return res.status(400).json({ message: 'isAvailable doit être un booléen et doit être fourni' });
+    }
+
+    const manager = await Manager.findById(req.user.id);
+    if (!manager) {
+      return res.status(404).json({ message: 'Manager non trouvé' });
+    }
+
+    // Utiliser updateOne pour éviter la validation complète
+    await Manager.updateOne(
+      { _id: req.user.id },
+      { $set: { isAvailable: isAvailable, updatedAt: Date.now() } },
+      { runValidators: false } // Désactiver les validateurs pour cette mise à jour
+    );
+
+    res.status(200).json({ message: 'État de disponibilité mis à jour', isAvailable });
+  } catch (error) {
+    console.error('Erreur lors de la mise à jour de la disponibilité:', error.message);
+    res.status(500).json({ message: 'Erreur lors de la mise à jour de la disponibilité', error: error.message });
+  }
+};

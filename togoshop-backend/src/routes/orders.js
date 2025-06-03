@@ -1,50 +1,49 @@
 const express = require('express');
 const router = express.Router();
 const ordersController = require('../controllers/ordersController');
-const auth = require('../middleware/auth'); // Importation correcte
+const auth = require('../middleware/auth');
 const mongoose = require('mongoose');
 const Product = require('../models/Product');
 
-// Middleware de débogage pour toutes les routes
+// Middleware de débogage
 router.use((req, res, next) => {
   console.log(`Route appelée: ${req.method} ${req.originalUrl}`);
   console.log(`Chemin: ${req.path}`);
   next();
 });
 
-// Routes de gestion des commandes
-router.post('/', auth, ordersController.createOrder); // Crée une nouvelle commande
-router.get('/supermarket/:supermarketId/pending', auth, ordersController.getPendingOrders); // Récupère les commandes en attente d’un supermarché
-router.get('/user/cart', auth, ordersController.getUserCart); // Récupère le panier de l’utilisateur
-router.get('/user/me', auth, ordersController.getMyOrders); // Récupère les commandes de l’utilisateur
-router.get('/user/history', auth, ordersController.getUserOrderHistory); // Récupère l’historique des commandes
-router.get('/:id', auth, ordersController.getOrderById); // Récupère une commande par ID
-router.put('/:id', auth, ordersController.updateOrder); // Met à jour une commande
-router.put('/:id/status', auth, ordersController.updateOrderStatus); // Met à jour le statut d’une commande
+// Récupérer les commandes en attente du manager connecté
+router.get('/manager', auth, ordersController.getManagerOrders);
 
-// Route pour ajouter un commentaire à un produit dans une commande
-router.post('/:id/upload-photo', auth, ordersController.uploadPhoto); // Télécharge une photo pour une commande
+// Récupérer les commandes assignées au livreur connecté
+router.get('/driver/me', auth, ordersController.getDriverOrders);
 
-// Nouvelle route pour ajouter un produit au panier
+// Routes existantes
+router.post('/', auth, ordersController.createOrder);
+router.get('/supermarket/:supermarketId/pending', auth, ordersController.getPendingOrders);
+router.get('/user/cart', auth, ordersController.getUserCart);
+router.get('/user/me', auth, ordersController.getMyOrders);
+router.get('/user/history', auth, ordersController.getUserOrderHistory);
+router.get('/:id', auth, ordersController.getOrderById);
+router.put('/:id', auth, ordersController.updateOrder);
+router.put('/:id/status', auth, ordersController.updateOrderStatus);
+router.post('/:id/upload-photo', auth, ordersController.uploadPhoto);
 router.post('/user/cart', auth, ordersController.addToCart);
-
-// Route pour soumettre une commande (corrigée : suppression du /orders redondant)
 router.put('/:id/submit', auth, (req, res, next) => {
   console.log(`Route spécifique /:id/submit appelée avec id: ${req.params.id}`);
   next();
 }, ordersController.submitOrder);
 
-// Endpoint de débogage
+// Valider une livraison (par le client)
+router.post('/:id/validate-delivery', auth, ordersController.validateDelivery);
+
+// Debug produit
 router.get('/debug/product/:id', auth, async (req, res) => {
   try {
-    console.log(`Requête GET /api/debug/product/:id avec id=${req.params.id}`);
     const product = await Product.findOne({ _id: new mongoose.Types.ObjectId(req.params.id) });
-    if (!product) {
-      return res.status(404).json({ message: 'Produit non trouvé' });
-    }
+    if (!product) return res.status(404).json({ message: 'Produit non trouvé' });
     res.status(200).json(product);
   } catch (error) {
-    console.error('Erreur lors de la récupération du produit:', error.message);
     res.status(500).json({ message: 'Erreur lors de la récupération du produit', error: error.message });
   }
 });

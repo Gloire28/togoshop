@@ -15,4 +15,19 @@ router.get('/me', auth, driversController.getDriver);
 // Mettre à jour la position du livreur
 router.put('/location', auth, driversController.updateDriverLocation);
 
+// Activer/Désactiver la détectabilité
+router.put('/discoverable', auth, driversController.toggleDiscoverable);
+
+// Récupérer la position d’un livreur (pour le suivi client)
+router.get('/:id/location', auth, driversController.getDriverLocation);
+
+// Accepter une commande
+router.post('/orders/accept', auth, driversController.acceptOrder);
+
+// Rejeter une commande
+router.post('/orders/reject', auth, driversController.rejectOrder);
+
+// Mettre à jour le statut d'une commande (par le livreur)
+router.put('/orders/status', auth, driversController.updateOrderStatus);
+
 module.exports = router;

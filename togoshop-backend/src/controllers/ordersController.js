@@ -10,31 +10,8 @@ const { assignDriver } = require('../services/optimizer');
 const { sendNotification } = require('../services/notifications');
 const { calculateDistance } = require('../services/geolocationBackend');
 const loyaltyController = require('./loyaltyController');
-
-// Fonction utilitaire pour ajouter des points de fidélité
-const addLoyaltyPoints = async (userId, points, description) => {
-  try {
-    let loyalty = await Loyalty.findOne({ userId });
-    if (!loyalty) {
-      loyalty = new Loyalty({ userId, points: 0, transactions: [] });
-    }
-
-    loyalty.points += points;
-    loyalty.transactions.push({
-      type: 'credit',
-      points,
-      description,
-      date: new Date(),
-    });
-
-    await loyalty.save();
-    console.log(`Points ajoutés pour userId ${userId}: ${points} points, description: ${description}`);
-    return loyalty;
-  } catch (error) {
-    console.error('Erreur lors de l\'ajout des points de fidélité:', error.message);
-    throw error;
-  }
-};
+const { validateStock, checkAndAssignDynamicOrders } = require('../services/orderUtils');
+const { createPayment } = require('./paymentsController');
 
 // Ajouter un produit au panier
 exports.addToCart = async (req, res) => {
@@ -120,13 +97,11 @@ exports.createOrder = async (req, res) => {
   try {
     const { clientId, products, supermarketId, locationId, deliveryAddress, scheduledDeliveryTime, deliveryType, comments } = req.body;
 
-    // Validation des champs minimum requis
     if (!products || !Array.isArray(products) || products.length === 0 || !supermarketId || !locationId) {
       console.log('Champs manquants dans la requête:', { products, supermarketId, locationId, deliveryAddress });
       return res.status(400).json({ message: 'Produits, supermarché et site sont requis' });
     }
 
-    // Définir clientId : admins peuvent spécifier un clientId, clients utilisent leur propre ID
     const orderClientId = req.user.role === 'admin' ? clientId : req.user.id;
     if (!orderClientId) {
       return res.status(400).json({ message: 'clientId est requis pour les administrateurs' });
@@ -134,7 +109,6 @@ exports.createOrder = async (req, res) => {
 
     console.log('User ID:', req.user.id, 'User Role:', req.user.role, 'Client ID:', orderClientId);
 
-    // Recherche du supermarché
     const supermarket = await Supermarket.findById(supermarketId);
     if (!supermarket) {
       console.log('Supermarché non trouvé pour _id:', supermarketId);
@@ -144,7 +118,6 @@ exports.createOrder = async (req, res) => {
     const supermarketObj = supermarket.toObject();
     console.log('Supermarché récupéré (après toObject):', JSON.stringify(supermarketObj));
 
-    // Vérification des emplacements du supermarché
     if (!supermarketObj.locations || !Array.isArray(supermarketObj.locations)) {
       console.log('Aucun emplacement défini pour le supermarché:', supermarketId);
       return res.status(400).json({ message: 'Le supermarché n’a pas d’emplacements définis' });
@@ -160,91 +133,13 @@ exports.createOrder = async (req, res) => {
       return res.status(400).json({ message: `Site ${locationId} invalide pour ce supermarché` });
     }
 
-    let totalAmount = 0;
-    let totalWeight = 0;
-    let additionalFees = 0;
-    const stockIssues = [];
-    const updatedProducts = [];
-
-    // Vérification des produits et calcul du montant total
-    for (const item of products) {
-      if (!item.productId || !item.quantity || item.quantity < 1) {
-        console.log('Produit invalide:', item);
-        return res.status(400).json({ message: 'Chaque produit doit avoir un productId et une quantité positive' });
-      }
-
-      const product = await Product.findById(item.productId);
-      if (!product) {
-        console.log('Produit non trouvé pour _id:', item.productId);
-        return res.status(404).json({ message: `Produit ${item.productId} non trouvé` });
-      }
-
-      if (product.supermarketId.toString() !== supermarketId) {
-        console.log(`Produit ${item.productId} n’appartient pas au supermarché ${supermarketId}`);
-        return res.status(400).json({ message: `Produit ${item.productId} n’appartient pas à ce supermarché` });
-      }
-
-      let stockLocationId = locationId;
-      let itemAdditionalFee = 0;
-      if (item.alternativeLocationId) {
-        stockLocationId = item.alternativeLocationId;
-        const altLocation = supermarketObj.locations.find(loc => {
-          const locId = loc._id instanceof mongoose.Types.ObjectId ? loc._id.toString() : loc._id;
-          return locId === stockLocationId;
-        });
-        if (!altLocation) {
-          console.log(`Site alternatif ${stockLocationId} invalide`);
-          return res.status(400).json({ message: `Site alternatif ${stockLocationId} invalide` });
-        }
-        const distance = calculateDistance(location.latitude, location.longitude, altLocation.latitude, altLocation.longitude);
-        itemAdditionalFee = 200 + 50 * distance;
-        additionalFees += itemAdditionalFee;
-        console.log(`Frais supplémentaires pour ${item.productId} à ${stockLocationId}: ${itemAdditionalFee} FCFA`);
-      }
-
-      const stock = product.stockByLocation.find(loc => loc.locationId === stockLocationId);
-      if (!stock || stock.stock < item.quantity) {
-        const substitutes = await Product.find({
-          supermarketId,
-          category: product.category,
-          _id: { $ne: product._id },
-          stockByLocation: { $elemMatch: { locationId, stock: { $gte: item.quantity } } },
-        }).limit(3);
-
-        const otherLocations = product.stockByLocation.filter(loc => loc.locationId !== locationId && loc.stock >= item.quantity);
-        const alternativeSites = otherLocations.map(loc => {
-          const altLocation = supermarketObj.locations.find(l => {
-            const locId = l._id instanceof mongoose.Types.ObjectId ? l._id.toString() : l._id;
-            return locId === loc.locationId;
-          });
-          const distance = calculateDistance(location.latitude, location.longitude, altLocation.latitude, altLocation.longitude);
-          return {
-            locationId: loc.locationId,
-            stock: loc.stock,
-            additionalFee: Math.round(200 + 50 * distance),
-          };
-        });
-
-        stockIssues.push({
-          productId: item.productId,
-          productName: product.name,
-          requestedQuantity: item.quantity,
-          availableStock: stock ? stock.stock : 0,
-          substitutes: substitutes.map(sub => ({ id: sub._id, name: sub.name, price: sub.price })),
-          alternativeSites,
-        });
-      } else {
-        totalAmount += product.price * item.quantity;
-        totalWeight += (product.weight || 1) * item.quantity;
-        updatedProducts.push({
-          productId: item.productId,
-          quantity: item.quantity,
-          alternativeLocationId: item.alternativeLocationId || '',
-          comment: item.comment || '',
-          photoUrl: item.photoUrl || '',
-        });
-      }
-    }
+    const { stockIssues, updatedProducts, totalAmount, totalWeight, deliveryFee, additionalFees } = await validateStock(
+      products,
+      supermarketId,
+      locationId,
+      deliveryType || 'standard',
+      deliveryAddress
+    );
 
     if (stockIssues.length > 0) {
       return res.status(200).json({
@@ -259,36 +154,15 @@ exports.createOrder = async (req, res) => {
         partialOrder: {
           products: updatedProducts,
           totalAmount,
-          deliveryFee: deliveryType === 'evening' ? 400 : 500,
+          deliveryFee,
         },
       });
     }
 
-    // Calcul des frais de livraison
-    let deliveryFee = deliveryType === 'evening' ? 400 : 500;
-    if (deliveryType !== 'evening' && deliveryAddress && deliveryAddress.lat && deliveryAddress.lng) {
-      const distance = calculateDistance(location.latitude, location.longitude, deliveryAddress.lat, deliveryAddress.lng);
-      const distanceFee = distance > 5 ? (distance - 5) * 100 : 0;
-      const weightFee = totalWeight > 5 ? (totalWeight - 5) * 50 : 0;
-      deliveryFee += distanceFee + weightFee;
-      console.log(`Frais de livraison calculés: base=${deliveryType === 'evening' ? 400 : 500}, distanceFee=${distanceFee}, weightFee=${weightFee}, total=${deliveryFee}`);
-    }
-
-    if (totalAmount < 0) {
-      console.log('Montant total négatif détecté:', totalAmount);
-      return res.status(400).json({ message: 'Le montant total ne peut pas être négatif' });
-    }
-    if (deliveryFee < 0) {
-      console.log('Frais de livraison négatifs détectés:', deliveryFee);
-      return res.status(400).json({ message: 'Les frais de livraison ne peuvent pas être négatifs' });
-    }
-
-    // Calcul de la position dans la file d'attente
     const pendingOrders = await Order.countDocuments({ supermarketId, locationId, status: { $in: ['pending_validation', 'awaiting_validator'] } });
     const queuePosition = pendingOrders + 1;
     console.log(`Position dans la file d'attente: ${queuePosition}`);
 
-    // Assignation d'un validateur (manager)
     let assignedManager = null;
     try {
       assignedManager = await assignManager(String(supermarketId), String(locationId));
@@ -306,7 +180,6 @@ exports.createOrder = async (req, res) => {
       lng: 1.2314,
     };
 
-    // Création et sauvegarde de la commande
     const order = new Order({
       clientId: orderClientId,
       supermarketId,
@@ -327,7 +200,6 @@ exports.createOrder = async (req, res) => {
     await order.save();
     console.log('Commande sauvegardée avec succès, _id:', order._id);
 
-    // Envoi d'une notification au client
     await sendNotification(orderClientId, `Votre commande est en attente (position ${queuePosition})`);
     console.log(`Notification envoyée au client ${orderClientId}`);
 
@@ -343,13 +215,6 @@ exports.getPendingOrders = async (req, res) => {
   try {
     const { supermarketId } = req.params;
 
-    // Vérification des permissions (admin ou validateur)
-    if (req.user.role !== 'admin' && !(req.user.role === 'order_validator' && req.user.supermarketId === supermarketId)) {
-      console.log(`Accès refusé pour utilisateur ${req.user.id}, rôle: ${req.user.role}, supermarketId: ${req.user.supermarketId}`);
-      return res.status(403).json({ message: 'Accès réservé à l’administrateur ou au validateur de commandes' });
-    }
-
-    // Récupération des commandes en attente
     const orders = await Order.find({ supermarketId, status: { $in: ['pending_validation', 'awaiting_validator'] } })
       .populate('products.productId')
       .sort('createdAt');
@@ -366,27 +231,25 @@ exports.getUserCart = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Recherche uniquement les commandes en 'cart_in_progress'
     let order = await Order.findOne({
       clientId: userId,
-      status: 'cart_in_progress', // Filtre strict sur cart_in_progress
+      status: 'cart_in_progress',
     })
-      .sort({ updatedAt: -1 }) // Trie par date de mise à jour décroissante
+      .sort({ updatedAt: -1 })
       .populate({
         path: 'products.productId',
-        select: 'name price stockByLocation weight', // Sélectionner uniquement les champs nécessaires
+        select: 'name price stockByLocation weight',
       })
       .populate({
         path: 'supermarketId',
-        select: 'name locations', // Sélectionner uniquement les champs nécessaires
+        select: 'name locations',
       })
-      .lean(); // Utiliser .lean() pour des performances accrues (retourne un objet JS simple)
+      .lean();
 
     if (!order) {
       return res.status(200).json({ message: 'Aucune commande dans le panier', order: null });
     }
 
-    // Vérifier et recalculer totalAmount si nécessaire
     const calculatedTotal = order.products.reduce((total, item) => {
       const productPrice = item.productId?.price || 0;
       return total + item.quantity * productPrice;
@@ -394,7 +257,6 @@ exports.getUserCart = async (req, res) => {
 
     if (order.totalAmount !== calculatedTotal) {
       order.totalAmount = calculatedTotal;
-      // Mettre à jour uniquement si nécessaire
       await Order.updateOne(
         { _id: order._id },
         { $set: { totalAmount: calculatedTotal, updatedAt: new Date() } }
@@ -412,26 +274,32 @@ exports.getUserCart = async (req, res) => {
 exports.getOrderById = async (req, res) => {
   try {
     const { id } = req.params;
-    console.log(`Récupération de la commande ${id}`);
 
     const order = await Order.findById(id)
       .populate('products.productId')
       .populate('supermarketId');
 
     if (!order) {
-      console.log(`Commande non trouvée pour _id ${id}`);
       return res.status(404).json({ message: 'Commande non trouvée' });
     }
 
     if (req.user.role !== 'admin' && order.clientId.toString() !== req.user.id) {
-      console.log(`Utilisateur ${req.user.id} non autorisé à accéder à la commande ${id}`);
       return res.status(403).json({ message: 'Accès non autorisé' });
     }
 
-    console.log(`Commande récupérée pour _id ${id}`);
-    res.status(200).json(order);
+    let zoneOrders = [];
+    if (order.zoneId && order.status === 'ready_for_pickup' && req.user.role === 'driver') {
+      zoneOrders = await Order.find({
+        zoneId: order.zoneId,
+        status: 'ready_for_pickup',
+        deliveryType: { $ne: 'evening' },
+      })
+        .populate('products.productId')
+        .populate('supermarketId');
+    }
+
+    res.status(200).json({ order, zoneOrders });
   } catch (error) {
-    console.error('Erreur lors de la récupération de la commande:', error.message);
     res.status(500).json({ message: 'Erreur lors de la récupération de la commande', error: error.message });
   }
 };
@@ -457,7 +325,8 @@ exports.getUserOrderHistory = async (req, res) => {
     res.status(500).json({ message: 'Erreur lors de la récupération de l\'historique', error: error.message });
   }
 };
-// Récupérer toutes les commandes de l'utilisateur connecté (pour /api/orders/me)
+
+// Récupérer toutes les commandes de l'utilisateur connecté
 exports.getMyOrders = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -482,133 +351,39 @@ exports.getMyOrders = async (req, res) => {
   }
 };
 
-// Mettre à jour une commande (modifier quantités, supprimer produits)
+// Mettre à jour une commande
 exports.updateOrder = async (req, res) => {
   try {
     const { id } = req.params;
     const { products, deliveryAddress } = req.body;
 
-    console.log(`Mise à jour de la commande ${id} avec req.body:`, JSON.stringify(req.body));
-
     let order = await Order.findById(id).populate('products.productId');
+    console.log(`Statut actuel de la commande ${id}: ${order.status}`);
     if (!order) {
-      console.log(`Commande non trouvée pour _id ${id}`);
       return res.status(404).json({ message: 'Commande non trouvée' });
     }
 
     if (order.clientId.toString() !== req.user.id) {
-      console.log(`Utilisateur ${req.user.id} non autorisé à modifier la commande ${id}`);
       return res.status(403).json({ message: 'Non autorisé à modifier cette commande' });
     }
 
-    // Autoriser les modifications pour cart_in_progress, pending_validation, et awaiting_validator
     if (!['cart_in_progress', 'pending_validation', 'awaiting_validator'].includes(order.status)) {
-      console.log(`Commande ${id} n'est plus modifiable, statut: ${order.status}`);
       return res.status(400).json({ message: 'La commande n’est plus modifiable' });
     }
 
     if (!products || !Array.isArray(products)) {
-      console.log('Produits invalides dans la requête:', products);
       return res.status(400).json({ message: 'Liste de produits requise' });
     }
 
-    const supermarket = await Supermarket.findById(order.supermarketId);
-    if (!supermarket) {
-      console.log('Supermarché non trouvé pour _id:', order.supermarketId);
-      return res.status(404).json({ message: 'Supermarché non trouvé' });
-    }
-
-    const supermarketObj = supermarket.toObject();
-    const location = supermarketObj.locations.find(loc => loc._id.toString() === order.locationId);
-    if (!location) {
-      console.log(`Site ${order.locationId} non trouvé dans les sites du supermarché`);
-      return res.status(400).json({ message: `Site ${order.locationId} invalide pour ce supermarché` });
-    }
-
-    let totalAmount = 0;
-    let totalWeight = 0;
-    let additionalFees = 0;
-    const stockIssues = [];
-    const updatedProducts = [];
-
-    for (const item of products) {
-      if (!item.productId || !item.quantity || item.quantity < 1) {
-        console.log('Produit invalide:', item);
-        return res.status(400).json({ message: 'Chaque produit doit avoir un productId et une quantité positive' });
-      }
-
-      const product = await Product.findById(item.productId);
-      if (!product) {
-        console.log('Produit non trouvé pour _id:', item.productId);
-        return res.status(404).json({ message: `Produit ${item.productId} non trouvé` });
-      }
-
-      if (product.supermarketId.toString() !== order.supermarketId.toString()) {
-        console.log(`Produit ${item.productId} n’appartient pas au supermarché ${order.supermarketId}`);
-        return res.status(400).json({ message: `Produit ${item.productId} n’appartient pas à ce supermarché` });
-      }
-
-      let stockLocationId = order.locationId;
-      let itemAdditionalFee = 0;
-      if (item.alternativeLocationId) {
-        stockLocationId = item.alternativeLocationId;
-        const altLocation = supermarketObj.locations.find(loc => loc._id.toString() === stockLocationId);
-        if (!altLocation) {
-          console.log(`Site alternatif ${stockLocationId} invalide`);
-          return res.status(400).json({ message: `Site alternatif ${stockLocationId} invalide` });
-        }
-        const distance = calculateDistance(location.latitude, location.longitude, altLocation.latitude, altLocation.longitude);
-        itemAdditionalFee = 200 + 50 * distance;
-        additionalFees += itemAdditionalFee;
-        console.log(`Frais supplémentaires pour ${item.productId} à ${stockLocationId}: ${itemAdditionalFee} FCFA`);
-      }
-
-      const stock = product.stockByLocation.find(loc => loc.locationId === stockLocationId);
-      if (!stock || stock.stock < item.quantity) {
-        console.log(`Rupture de stock pour productId: ${item.productId}, locationId: ${stockLocationId}`);
-        const substitutes = await Product.find({
-          supermarketId: order.supermarketId,
-          category: product.category,
-          _id: { $ne: product._id },
-          stockByLocation: {
-            $elemMatch: { locationId: order.locationId, stock: { $gte: item.quantity } }
-          }
-        }).limit(3);
-
-        const otherLocations = product.stockByLocation.filter(loc => loc.locationId !== order.locationId && loc.stock >= item.quantity);
-        const alternativeSites = otherLocations.map(loc => {
-          const altLocation = supermarketObj.locations.find(l => l._id.toString() === loc.locationId);
-          const distance = calculateDistance(location.latitude, location.longitude, altLocation.latitude, altLocation.longitude);
-          return {
-            locationId: loc.locationId,
-            stock: loc.stock,
-            additionalFee: Math.round(200 + 50 * distance),
-          };
-        });
-
-        stockIssues.push({
-          productId: item.productId,
-          productName: product.name,
-          requestedQuantity: item.quantity,
-          availableStock: stock ? stock.stock : 0,
-          substitutes: substitutes.map(sub => ({ id: sub._id, name: sub.name, price: sub.price })),
-          alternativeSites,
-        });
-      } else {
-        totalAmount += product.price * item.quantity;
-        totalWeight += (product.weight || 1) * item.quantity;
-        updatedProducts.push({
-          productId: item.productId,
-          quantity: item.quantity,
-          alternativeLocationId: item.alternativeLocationId || '',
-          comment: item.comment || '',
-          photoUrl: item.photoUrl || '',
-        });
-      }
-    }
+    const { stockIssues, updatedProducts, subtotal, totalWeight, deliveryFee, additionalFees, serviceFee, totalAmount } = await validateStock(
+      products,
+      order.supermarketId.toString(),
+      order.locationId,
+      order.deliveryType,
+      deliveryAddress || order.deliveryAddress
+    );
 
     if (stockIssues.length > 0) {
-      console.log('Problèmes de stock détectés lors de la mise à jour:', JSON.stringify(stockIssues));
       return res.status(200).json({
         message: 'Problème de stock pour certains produits',
         stockIssues,
@@ -620,13 +395,12 @@ exports.updateOrder = async (req, res) => {
         },
         partialOrder: {
           products: updatedProducts,
-          totalAmount,
-          deliveryFee: order.deliveryFee,
+          subtotal,
+          deliveryFee,
         },
       });
     }
 
-    // Mettre à jour deliveryAddress si fourni
     if (deliveryAddress) {
       order.deliveryAddress = {
         address: deliveryAddress.address || order.deliveryAddress.address,
@@ -634,39 +408,35 @@ exports.updateOrder = async (req, res) => {
         lng: deliveryAddress.lng || order.deliveryAddress.lng,
         instructions: deliveryAddress.instructions || order.deliveryAddress.instructions,
       };
-      console.log(`deliveryAddress mis à jour:`, order.deliveryAddress);
-    }
-
-    let deliveryFee = order.deliveryFee;
-    if (order.deliveryType !== 'evening') {
-      const distance = calculateDistance(
-        location.latitude,
-        location.longitude,
-        order.deliveryAddress.lat || 6.1725,
-        order.deliveryAddress.lng || 1.2314
-      );
-      const distanceFee = distance > 5 ? (distance - 5) * 100 : 0;
-      const weightFee = totalWeight > 5 ? (totalWeight - 5) * 50 : 0;
-      deliveryFee = 500 + distanceFee + weightFee;
-      console.log(`Frais de livraison recalculés: base=500, distanceFee=${distanceFee}, weightFee=${weightFee}, total=${deliveryFee}`);
     }
 
     order.products = updatedProducts;
-    order.totalAmount = totalAmount;
+    order.subtotal = subtotal; // Stocker le sous-total
     order.deliveryFee = deliveryFee;
     order.additionalFees = additionalFees;
+    order.serviceFee = serviceFee; // Stocker les frais de service
+    order.totalAmount = totalAmount; // Stocker le montant total
     await order.save();
 
-    // Recharger la commande pour renvoyer une réponse cohérente
     order = await Order.findById(id).populate('products.productId');
-    console.log(`Commande ${id} mise à jour avec succès`);
-    res.status(200).json(order);
+    res.status(200).json({
+      success: true,
+      order: {
+        ...order.toObject(),
+        subtotal: order.subtotal,
+        deliveryFee: order.deliveryFee,
+        serviceFee: order.serviceFee,
+        totalAmount: order.totalAmount,
+      },
+      nextStep: 'payment',
+    });
   } catch (error) {
     console.error('Erreur lors de la mise à jour de la commande:', error.message);
     res.status(500).json({ message: 'Erreur lors de la mise à jour de la commande', error: error.message });
   }
 };
 
+// Mettre à jour le statut d’une commande
 exports.updateOrderStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -680,41 +450,28 @@ exports.updateOrderStatus = async (req, res) => {
 
     console.log(`Commande récupérée pour _id ${id}:`, order);
 
-    // Vérification des permissions
-    if (req.user.roles && !req.user.roles.includes('admin') && !(req.user.roles.includes('order_validator') && req.user.supermarketId && req.user.supermarketId.toString() === order.supermarketId.toString())) {
-      // Exception pour les drivers qui mettent à jour leur propre commande à 'delivered'
-      if (!(req.user.role === 'driver' && status === 'delivered' && order.driverId && order.driverId.toString() === req.user.id)) {
-        console.log(`Accès refusé pour utilisateur ${req.user.id}, rôles: ${req.user.roles}, supermarketId: ${req.user.supermarketId}`);
-        return res.status(403).json({ message: 'Accès réservé à l’administrateur ou au validateur de commandes' });
-      }
-      console.log(`Accès autorisé: Driver ${req.user.id} met à jour sa propre commande à 'delivered'`);
-    }
-
-    // Définition des transitions de statut valides
     const statusTransitions = {
-      'pending_validation': ['validated', 'cancelled'],
-      'awaiting_validator': ['pending_validation', 'cancelled'],
-      'validated': ['in_delivery', 'cancelled'],
-      'in_delivery': ['delivered', 'cancelled'],
-      'delivered': [],
-      'cancelled': [],
+      awaiting_validator: ['pending_validation', 'cancelled'],
+      pending_validation: ['validated', 'cancelled'],
+      validated: ['ready_for_delivery', 'cancelled'],
+      ready_for_delivery: ['in_delivery', 'cancelled'],
+      in_delivery: ['delivered', 'cancelled'],
+      delivered: [],
+      cancelled: [],
     };
 
-    // Validation du nouveau statut
-    const validStatuses = ['pending_validation', 'awaiting_validator', 'validated', 'in_delivery', 'delivered', 'cancelled'];
-    if (!validStatuses.includes(status)) {
+    const validStatuses = ['awaiting_validator', 'pending_validation', 'validated', 'ready_for_delivery', 'in_delivery', 'delivered', 'cancelled'];
+    if (!status || !validStatuses.includes(status)) {
       console.log(`Statut invalide: ${status}`);
       return res.status(400).json({ message: 'Statut invalide' });
     }
 
-    // Vérification des transitions de statut
     const allowedTransitions = statusTransitions[order.status] || [];
     if (!allowedTransitions.includes(status)) {
       console.log(`Transition de statut non autorisée: de ${order.status} à ${status}`);
       return res.status(400).json({ message: `Transition de statut non autorisée: de ${order.status} à ${status}` });
     }
 
-    // Vérification du paiement pour le statut 'validated'
     if (status === 'validated') {
       const payment = await Payment.findOne({ orderId: id });
       if (!payment || payment.status !== 'completed') {
@@ -723,9 +480,18 @@ exports.updateOrderStatus = async (req, res) => {
       }
     }
 
-    // Gestion des transitions spécifiques
+    if (status === 'pending_validation' && !order.assignedManager) {
+      try {
+        const managerId = await assignManager(order.supermarketId, order.locationId);
+        order.assignedManager = managerId;
+        console.log(`Manager assigné: ${managerId}`);
+      } catch (error) {
+        console.error('Erreur lors de l’assignation du manager:', error.message);
+        return res.status(500).json({ message: error.message });
+      }
+    }
+
     if (status === 'validated' && order.status !== 'validated') {
-      // Mise à jour du stock
       for (const item of order.products) {
         console.log(`Traitement du produit ${item.productId} avec quantité ${item.quantity}`);
 
@@ -761,8 +527,7 @@ exports.updateOrderStatus = async (req, res) => {
       }
     }
 
-    // Assignation du livreur lors du passage à in_delivery
-    if (status === 'in_delivery' && !order.driverId) {
+    if (status === 'ready_for_delivery' && !order.driverId) {
       try {
         const supermarket = await Supermarket.findOne({ _id: order.supermarketId });
         if (!supermarket) {
@@ -770,7 +535,7 @@ exports.updateOrderStatus = async (req, res) => {
           return res.status(404).json({ message: 'Supermarché non trouvé' });
         }
 
-        const location = supermarket.locations.find(loc => loc._id === order.locationId);
+        const location = supermarket.locations.find(loc => loc._id.toString() === order.locationId);
         if (!location) {
           console.log(`Emplacement ${order.locationId} non trouvé pour le supermarché ${order.supermarketId}`);
           return res.status(404).json({ message: 'Emplacement non trouvé pour ce supermarché' });
@@ -789,25 +554,29 @@ exports.updateOrderStatus = async (req, res) => {
         console.error('Erreur lors de l\'assignation du livreur:', error.message);
         return res.status(500).json({ message: 'Erreur lors de l’assignation du livreur', error: error.message });
       }
-    } else if (status === 'delivered') {
+    }
+
+    if (status === 'delivered') {
       order.status = status;
 
-      // Ajout des points de fidélité
-      const points = Math.floor(order.totalAmount / 2000); // 1 point par 2000 FCFA
+      const points = Math.floor(order.totalAmount / 2000);
       console.log(`Ajout de ${points} points de fidélité pour la commande ${id} avec montant ${order.totalAmount}`);
 
       try {
-        await loyaltyController.addPoints({
-          user: { id: order.clientId.toString(), role: 'client' },
-          body: {
-            points: points,
-            description: `Commande livrée (ID: ${order._id})`,
-            fromOrder: true
+        await loyaltyController.addPoints(
+          {
+            user: { id: order.clientId.toString(), role: 'client' },
+            body: {
+              points: points,
+              description: `Commande livrée (ID: ${order._id})`,
+              fromOrder: true,
+            },
+          },
+          {
+            status: (code) => ({ json: (data) => console.log('Réponse ajout points:', data) }),
+            json: (data) => console.log('Réponse ajout points:', data),
           }
-        }, {
-          status: (code) => ({ json: (data) => console.log('Réponse ajout points:', data) }),
-          json: (data) => console.log('Réponse ajout points:', data)
-        });
+        );
         console.log(`Points ajoutés avec succès pour l'utilisateur ${order.clientId}`);
       } catch (error) {
         console.error('Erreur lors de l’ajout des points:', error.message);
@@ -818,7 +587,6 @@ exports.updateOrderStatus = async (req, res) => {
         `Votre commande (ID: ${order._id}) a été livrée ! Vous avez gagné ${points} points de fidélité.`
       );
 
-      // Mise à jour du livreur (si présent)
       if (order.driverId) {
         const driver = await Driver.findOne({ _id: new mongoose.Types.ObjectId(order.driverId) });
         if (driver) {
@@ -832,29 +600,32 @@ exports.updateOrderStatus = async (req, res) => {
       } else {
         console.log('Aucun driverId trouvé pour cette commande, points ajoutés malgré tout');
       }
-    } else {
-      order.status = status;
-      console.log(`Commande mise à jour directement avec statut ${status}:`, order);
     }
 
+    order.status = status;
+    order.updatedAt = Date.now();
     await order.save();
     console.log(`Commande sauvegardée après mise à jour:`, order);
+
+    if (status === 'ready_for_pickup') {
+      await checkAndAssignDynamicOrders(id);
+    }
 
     await sendNotification(order.clientId, `Votre commande est maintenant ${order.status}`);
     console.log(`Notification envoyée au client ${order.clientId} pour le statut ${order.status}`);
 
-    res.status(200).json(order);
+    res.status(200).json({ message: 'Statut mis à jour avec succès', order });
   } catch (error) {
     console.error('Erreur dans updateOrderStatus:', error.message);
     res.status(500).json({ message: 'Erreur lors de la mise à jour de la commande', error: error.message });
   }
 };
+
 exports.uploadPhoto = async (req, res) => {
   try {
     const { id } = req.params;
     const { productId, comment } = req.body;
 
-    // Vérifier que productId est présent
     if (!productId) {
       console.log('productId manquant dans la requête');
       return res.status(400).json({ message: 'productId est requis' });
@@ -882,12 +653,11 @@ exports.uploadPhoto = async (req, res) => {
       return res.status(404).json({ message: 'Produit non trouvé dans la commande' });
     }
 
-    // Mettre à jour ou réinitialiser le commentaire
     if (comment) {
       product.comment = comment;
       console.log(`Commentaire ajouté pour le produit ${productId}: ${comment}`);
     } else {
-      product.comment = null; // Réinitialiser à null si aucun commentaire n'est fourni
+      product.comment = null;
       console.log(`Commentaire réinitialisé à null pour le produit ${productId}`);
     }
 
@@ -906,7 +676,20 @@ exports.uploadPhoto = async (req, res) => {
 exports.submitOrder = async (req, res) => {
   try {
     const { id } = req.params;
-    const order = await Order.findById(id);
+    const { paymentMethod, deliveryType, clientPhone } = req.body;
+
+    // Validation des champs requis
+    if (!paymentMethod || !['Flooz', 'TMoney', 'Wallet', 'cash'].includes(paymentMethod)) {
+      return res.status(400).json({ message: 'Mode de paiement invalide' });
+    }
+    if (!deliveryType || !['standard', 'evening', 'retrait'].includes(deliveryType)) {
+      return res.status(400).json({ message: 'Type de livraison invalide' });
+    }
+    if (['Flooz', 'TMoney'].includes(paymentMethod) && (!clientPhone || !/^\d{8,12}$/.test(clientPhone))) {
+      return res.status(400).json({ message: 'Numéro de téléphone invalide pour Flooz/TMoney' });
+    }
+
+    const order = await Order.findById(id).populate('products.productId');
     if (!order) {
       console.log(`Commande non trouvée pour _id ${id}`);
       return res.status(404).json({ message: 'Commande non trouvée' });
@@ -922,7 +705,46 @@ exports.submitOrder = async (req, res) => {
       return res.status(400).json({ message: 'La commande doit être en cart_in_progress pour être soumise' });
     }
 
-    // Calculer la position dans la file d'attente
+    // Recalculer les frais de livraison en fonction du deliveryType
+    const supermarket = await Supermarket.findById(order.supermarketId);
+    const location = supermarket.locations.find(loc => loc._id.toString() === order.locationId);
+    if (!location) {
+      return res.status(400).json({ message: 'Emplacement du supermarché non trouvé' });
+    }
+
+    let deliveryFee = deliveryType === 'evening' ? 400 : 500;
+    if (deliveryType !== 'evening' && order.deliveryAddress && order.deliveryAddress.lat && order.deliveryAddress.lng) {
+      const distance = calculateDistance(
+        location.latitude,
+        location.longitude,
+        order.deliveryAddress.lat,
+        order.deliveryAddress.lng
+      );
+      const distanceFee = distance > 5 ? (distance - 5) * 100 : 0;
+      const weightFee = order.products.reduce((total, item) => total + (item.weight || 1) * item.quantity, 0) > 5 ? 50 : 0;
+      deliveryFee += distanceFee + weightFee;
+    }
+
+    // Recalculer subtotal, serviceFee, et totalAmount
+    const subtotal = order.subtotal || order.products.reduce((sum, item) => sum + (item.productId?.price || 0) * item.quantity, 0);
+    const serviceFee = Math.round(subtotal * 0.10);
+    const totalAmount = subtotal + deliveryFee + (order.additionalFees || 0) + serviceFee;
+
+    order.subtotal = subtotal;
+    order.deliveryFee = deliveryFee;
+    order.serviceFee = serviceFee;
+    order.totalAmount = totalAmount;
+    order.deliveryType = deliveryType;
+    await order.save(); // Sauvegarder les modifications des frais
+
+    // Créer le paiement
+    const { paymentId, status: paymentStatus } = await createPayment(id, paymentMethod, clientPhone, req.user);
+
+    // Vérifier le statut du paiement avant de soumettre
+    if (paymentStatus !== 'completed') {
+      return res.status(400).json({ message: 'Le paiement n’a pas été complété. Paiement en attente de confirmation (Flooz/TMoney)' });
+    }
+
     const pendingOrders = await Order.countDocuments({
       supermarketId: order.supermarketId,
       locationId: order.locationId,
@@ -931,7 +753,6 @@ exports.submitOrder = async (req, res) => {
     const queuePosition = pendingOrders + 1;
     console.log(`Position dans la file d'attente: ${queuePosition}`);
 
-    // Tenter d'assigner un manager
     let assignedManager = null;
     try {
       assignedManager = await assignManager(String(order.supermarketId), String(order.locationId));
@@ -946,22 +767,102 @@ exports.submitOrder = async (req, res) => {
     order.assignedManager = assignedManager || null;
     await order.save();
 
-    // Notifier le client
+    const orderNumber = `ORD-${Math.floor(Math.random() * 100000)}`;
     await sendNotification(
       order.clientId,
-      `Votre commande (ID: ${order._id}) a été soumise. Position dans la file : ${queuePosition}. Statut : ${newStatus}`
+      `Votre commande (ID: ${order._id}, N°: ${orderNumber}) a été soumise. Position dans la file : ${queuePosition}. Statut : ${newStatus}`
     );
     console.log(`Notification envoyée au client ${order.clientId}`);
 
-    // Notifier le manager si assigné
     if (assignedManager) {
-      await sendNotification(assignedManager, `Nouvelle commande (ID: ${order._id}) à valider.`);
+      await sendNotification(assignedManager, `Nouvelle commande (ID: ${order._id}, N°: ${orderNumber}) à valider.`);
       console.log(`Notification envoyée au manager ${assignedManager}`);
     }
 
-    res.status(200).json({ success: true, order });
+    res.status(200).json({
+      success: true,
+      orderNumber,
+      order: {
+        ...order.toObject(),
+        subtotal,
+        deliveryFee,
+        serviceFee,
+        totalAmount,
+      },
+      paymentStatus,
+    });
   } catch (error) {
     console.error('Erreur lors de la soumission de la commande:', error.message);
     res.status(500).json({ message: 'Erreur lors de la soumission de la commande', error: error.message });
+  }
+};
+
+exports.getManagerOrders = async (req, res) => {
+  try {
+    const manager = req.user;
+    if (!manager.supermarketId || !manager.locationId) {
+      return res.status(400).json({ message: 'Informations de manager incomplètes' });
+    }
+
+    const supermarketId = String(manager.supermarketId);
+    const locationId = String(manager.locationId);
+    const managerId = String(manager.id);
+
+    const orders = await Order.find({
+      $or: [
+        { assignedManager: managerId },
+        {
+          supermarketId: supermarketId,
+          locationId: locationId,
+          status: { $in: ['pending_validation', 'awaiting_validator', 'validated'] },
+          assignedManager: { $in: [null, undefined] },
+          deliveryType: { $ne: 'evening' },
+        },
+      ],
+    })
+      .populate('clientId', 'name comments')
+      .populate('products.productId', 'name price')
+      .sort('createdAt');
+
+    if (!orders.length) {
+      return res.status(200).json({ message: 'Aucune commande à traiter', orders: [] });
+    }
+
+    res.status(200).json({ orders });
+  } catch (error) {
+    res.status(500).json({ message: 'Erreur lors de la récupération des commandes', error: error.message });
+  }
+};
+
+// Valider la livraison (par le client)
+exports.validateDelivery = async (req, res) => {
+  try {
+    const { orderId } = req.body;
+    let order = await Order.findById(orderId);
+    if (!order || order.status !== 'delivered' || order.clientId.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Accès non autorisé ou commande non prête pour validation' });
+    }
+
+    order.clientValidation = true;
+    await order.save();
+    await sendNotification(order.driverId, `Commande ${orderId} validée par le client.`);
+
+    res.status(200).json({ message: 'Livraison validée', order });
+  } catch (error) {
+    res.status(500).json({ message: 'Erreur', error: error.message });
+  }
+};
+// Récupérer les commandes assignées au livreur connecté
+exports.getDriverOrders = async (req, res) => {
+  try {
+    const driverId = req.user.id;
+    const orders = await Order.find({ driverId, status: { $in: ['in_delivery', 'ready_for_delivery'] } })
+      .populate('products.productId')
+      .populate('supermarketId')
+      .sort('updatedAt');
+    res.status(200).json(orders);
+  } catch (error) {
+    console.error('Erreur lors de la récupération des commandes du livreur:', error.message);
+    res.status(500).json({ message: 'Erreur lors de la récupération des commandes', error: error.message });
   }
 };

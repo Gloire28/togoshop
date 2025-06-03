@@ -1,24 +1,19 @@
-const Supermarket = require('../models/Supermarket');
+const Manager = require('../models/Manager');
 const Order = require('../models/Order');
 
 exports.assignManager = async (supermarketId, locationId) => {
   try {
-    // Trouver le supermarché en forçant _id comme String
-    const supermarket = await Supermarket.findOne({ _id: String(supermarketId) });
-    if (!supermarket) {
-      throw new Error('Supermarché non trouvé');
-    }
+    console.log(`Recherche de validateur pour supermarketId: ${supermarketId}, locationId: ${locationId}`);
 
-    // Log pour débogage
-    console.log('Supermarché trouvé:', supermarket._id);
-    console.log('Managers dans le supermarché:', JSON.stringify(supermarket.managers));
+    // Trouver tous les managers pour ce supermarché et ce site
+    const managers = await Manager.find({
+      supermarketId: supermarketId,
+      locationId: locationId,
+      isAvailable: true,
+      roles: { $in: ['order_validator'] }, // Filtrer les validateurs
+    });
 
-    // Trouver tous les validateurs pour ce supermarché et ce site
-    const managers = supermarket.managers.filter(manager => 
-      manager.role === 'order_validator' && manager.locationId === String(locationId)
-    );
-
-    console.log('Validateurs filtrés:', JSON.stringify(managers));
+    console.log(`Managers trouvés dans le supermarché et site:`, managers);
 
     if (!managers.length) {
       throw new Error('Aucun validateur disponible pour ce supermarché et ce site');
@@ -33,10 +28,10 @@ exports.assignManager = async (supermarketId, locationId) => {
         supermarketId: String(supermarketId),
         locationId: String(locationId),
         status: { $in: ['pending_validation', 'awaiting_validator'] },
-        assignedManager: String(manager.managerId), // S'assurer que c'est une chaîne
+        assignedManager: String(manager._id),
       });
 
-      console.log(`Charge de travail pour manager ${manager.managerId}: ${workload}`);
+      console.log(`Charge de travail pour manager ${manager._id}: ${workload}`);
 
       if (workload < minWorkload) {
         minWorkload = workload;
@@ -44,8 +39,8 @@ exports.assignManager = async (supermarketId, locationId) => {
       }
     }
 
-    console.log(`Manager sélectionné: ${selectedManager.managerId}`);
-    return selectedManager.managerId;
+    console.log(`Manager sélectionné: ${selectedManager._id}`);
+    return selectedManager._id;
   } catch (error) {
     console.error('Erreur lors de l’assignation du validateur:', error.message);
     throw new Error(`Erreur lors de l’assignation du validateur : ${error.message}`);

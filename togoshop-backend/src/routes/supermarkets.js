@@ -24,7 +24,7 @@ const isAdmin = (req, res, next) => {
 
 // Routes
 router.post('/', isAdmin, supermarketsController.createSupermarket);
-router.get('/', authMiddleware, supermarketsController.getAllSupermarkets); // Nouvelle route pour lister les supermarchés
+router.get('/', authMiddleware, supermarketsController.getAllSupermarkets);
 router.get('/:id', supermarketsController.getSupermarket);
 router.put('/:id', isAdmin, supermarketsController.updateSupermarket);
 

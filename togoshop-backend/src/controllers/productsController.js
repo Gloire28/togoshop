@@ -5,29 +5,25 @@ const mongoose = require('mongoose');
 // Ajouter un nouveau produit
 exports.createProduct = async (req, res) => {
   try {
-    // Vérifier les autorisations (admin ou validateur avec rôle "stock_manager")
-    if (req.user.role !== 'admin' && !(req.user.role === 'stock_manager' && req.user.supermarketId === req.body.supermarketId)) {
+    // Vérifier les autorisations
+    if (!req.user.roles.includes('admin') && !(req.user.roles.includes('stock_manager') && req.user.supermarketId === req.body.supermarketId)) {
       return res.status(403).json({ message: 'Accès réservé à l’administrateur ou au gestionnaire de stock' });
     }
 
     const { name, description, price, category, supermarketId, stockByLocation, weight, isMadeInTogo, imageUrl } = req.body;
 
-    // Vérifier les champs requis
     if (!name || !price || !category || !supermarketId || !stockByLocation || !Array.isArray(stockByLocation)) {
       return res.status(400).json({ message: 'Nom, prix, catégorie, supermarché et stock par site sont requis' });
     }
 
-    // Validation pour price
     if (price < 0) {
       return res.status(400).json({ message: 'Le prix du produit ne peut pas être négatif' });
     }
 
-    // Validation pour weight
-    if (weight !== undefined && (typeof weight !== 'number' || weight <= 0)) {
-      return res.status(400).json({ message: 'Le poids doit être un nombre positif' });
+    if (weight !== undefined && (typeof weight !== 'number' || weight < 0)) {
+      return res.status(400).json({ message: 'Le poids doit être un nombre positif ou zéro' });
     }
 
-    // Vérifier que le supermarché existe
     const supermarket = await Supermarket.findById(supermarketId);
     if (!supermarket) {
       return res.status(404).json({ message: 'Supermarché non trouvé' });
@@ -35,29 +31,14 @@ exports.createProduct = async (req, res) => {
 
     const supermarketObj = supermarket.toObject();
 
-    // Valider le stock par site
     for (const stock of stockByLocation) {
       if (!stock.locationId || typeof stock.stock !== 'number' || stock.stock < 0) {
         return res.status(400).json({ message: 'Format de stock invalide : locationId et stock (nombre positif) requis' });
       }
 
-      let locationExists = false;
-      const locations = supermarketObj.locations || [];
-      const sites = supermarketObj.sites || [];
-      locationExists = sites.some(loc => {
-        try {
-          const locId = loc._id instanceof mongoose.Types.ObjectId ? loc._id.toString() : loc._id.toString();
-          return locId === stock.locationId;
-        } catch (error) {
-          return false;
-        }
-      }) || locations.some(loc => {
-        try {
-          const locId = loc._id instanceof mongoose.Types.ObjectId ? loc._id.toString() : loc._id.toString();
-          return locId === stock.locationId;
-        } catch (error) {
-          return false;
-        }
+      const locationExists = (supermarketObj.locations || []).some(loc => {
+        const locId = loc._id instanceof mongoose.Types.ObjectId ? loc._id.toString() : loc._id.toString();
+        return locId === stock.locationId;
       });
 
       if (!locationExists) {
@@ -65,7 +46,6 @@ exports.createProduct = async (req, res) => {
       }
     }
 
-    // Générer un _id pour le produit
     const product = new Product({
       _id: new mongoose.Types.ObjectId().toString(),
       name,
@@ -121,12 +101,7 @@ exports.getProductsBySupermarket = async (req, res) => {
     const products = await Product.find(query);
 
     if (locationId) {
-      const locations = supermarketObj.locations || [];
-      const sites = supermarketObj.sites || [];
-      const locationExists = sites.some(loc => {
-        const locId = loc._id instanceof mongoose.Types.ObjectId ? loc._id.toString() : loc._id.toString();
-        return locId === locationId;
-      }) || locations.some(loc => {
+      const locationExists = (supermarketObj.locations || []).some(loc => {
         const locId = loc._id instanceof mongoose.Types.ObjectId ? loc._id.toString() : loc._id.toString();
         return locId === locationId;
       });
@@ -135,7 +110,6 @@ exports.getProductsBySupermarket = async (req, res) => {
         return res.status(400).json({ message: 'Site invalide pour ce supermarché' });
       }
 
-      // Inclure tous les produits, même ceux sans stock pour ce site
       const filteredProducts = products.map(product => {
         const stockEntry = product.stockByLocation.find(stock => stock.locationId === locationId);
         const updatedStock = stockEntry ? [stockEntry] : [{ locationId: locationId, stock: 0, _id: new mongoose.Types.ObjectId() }];
@@ -171,28 +145,25 @@ exports.getSubstitutes = async (req, res) => {
   try {
     const { category, supermarketId, locationId } = req.params;
 
-    // Valider les paramètres
     if (!mongoose.Types.ObjectId.isValid(supermarketId)) {
       return res.status(400).json({ message: 'ID du supermarché invalide' });
     }
 
-    // Vérifier que le supermarché existe
     const supermarket = await Supermarket.findById(supermarketId);
     if (!supermarket) {
       return res.status(404).json({ message: 'Supermarché non trouvé' });
     }
 
     const supermarketObj = supermarket.toObject();
-    const locationExists = supermarketObj.locations.some(loc => loc._id.toString() === locationId);
+    const locationExists = (supermarketObj.locations || []).some(loc => loc._id.toString() === locationId);
     if (!locationExists) {
       return res.status(400).json({ message: 'Site invalide pour ce supermarché' });
     }
 
-    // Rechercher des produits de la même catégorie, même site, avec stock > 0
     const substitutes = await Product.find({
       supermarketId,
       category: category.normalize('NFC'),
-      _id: { $ne: req.query.excludeProductId }, // Exclure le produit initial si fourni
+      _id: { $ne: req.query.excludeProductId },
       stockByLocation: {
         $elemMatch: { locationId: locationId, stock: { $gt: 0 } }
       }
@@ -209,19 +180,19 @@ exports.getSubstitutes = async (req, res) => {
 exports.updateProduct = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, price, category, stockByLocation, weight, isMadeInTogo, imageUrl } = req.body;
+    let { name, description, price, category, stockByLocation, weight, isMadeInTogo, imageUrl } = req.body;
+
+    console.log('Données brutes req.body:', req.body);
 
     const product = await Product.findById(id);
     if (!product) {
       return res.status(404).json({ message: 'Produit non trouvé' });
     }
 
-    // Vérifier les autorisations (admin ou validateur avec rôle "stock_manager")
-    if (req.user.role !== 'admin' && !(req.user.role === 'stock_manager' && req.user.supermarketId === product.supermarketId.toString())) {
+    if (!req.user.roles.includes('admin') && !(req.user.roles.includes('stock_manager') && req.user.supermarketId === product.supermarketId.toString())) {
       return res.status(403).json({ message: 'Accès réservé à l’administrateur ou au gestionnaire de stock' });
     }
 
-    // Vérifier que le supermarché existe
     const supermarket = await Supermarket.findById(product.supermarketId);
     if (!supermarket) {
       return res.status(404).json({ message: 'Supermarché non trouvé' });
@@ -229,17 +200,14 @@ exports.updateProduct = async (req, res) => {
 
     const supermarketObj = supermarket.toObject();
 
-    // Validation pour price
     if (price !== undefined && price < 0) {
       return res.status(400).json({ message: 'Le prix du produit ne peut pas être négatif' });
     }
 
-    // Validation pour weight
-    if (weight !== undefined && (typeof weight !== 'number' || weight <= 0)) {
-      return res.status(400).json({ message: 'Le poids doit être un nombre positif' });
+    if (weight !== undefined && (typeof weight !== 'number' || weight < 0)) {
+      return res.status(400).json({ message: 'Le poids doit être un nombre positif ou zéro' });
     }
 
-    // Mettre à jour les champs
     if (name) product.name = name;
     if (description) product.description = description;
     if (price !== undefined) product.price = price;
@@ -248,32 +216,44 @@ exports.updateProduct = async (req, res) => {
     if (isMadeInTogo !== undefined) product.isMadeInTogo = isMadeInTogo;
     if (imageUrl) product.imageUrl = imageUrl;
 
-    // Mettre à jour le stock par site
-    if (stockByLocation && Array.isArray(stockByLocation)) {
+    if (stockByLocation) {
+      console.log('stockByLocation brut:', stockByLocation);
+      stockByLocation = typeof stockByLocation === 'string' ? JSON.parse(stockByLocation) : stockByLocation;
+      console.log('stockByLocation après parsing:', stockByLocation);
+
+      if (!Array.isArray(stockByLocation)) {
+        return res.status(400).json({ message: 'stockByLocation doit être un tableau' });
+      }
+
       for (const stock of stockByLocation) {
+        console.log('Entrée stock:', stock);
         if (!stock.locationId || typeof stock.stock !== 'number' || stock.stock < 0) {
           return res.status(400).json({ message: 'Format de stock invalide : locationId et stock (nombre positif) requis' });
         }
-        const locations = supermarketObj.locations || [];
-        const sites = supermarketObj.sites || [];
-        const locationExists = sites.some(loc => {
-          const locId = loc._id instanceof mongoose.Types.ObjectId ? loc._id.toString() : loc._id.toString();
-          return locId === stock.locationId;
-        }) || locations.some(loc => {
+        const locationExists = (supermarketObj.locations || []).some(loc => {
           const locId = loc._id instanceof mongoose.Types.ObjectId ? loc._id.toString() : loc._id.toString();
           return locId === stock.locationId;
         });
         if (!locationExists) {
           return res.status(400).json({ message: `Site ${stock.locationId} invalide pour ce supermarché` });
         }
+
+        const stockIndex = product.stockByLocation.findIndex(s => s.locationId === stock.locationId);
+        console.log('Index trouvé:', stockIndex, 'Stock actuel:', product.stockByLocation);
+        if (stockIndex !== -1) {
+          product.stockByLocation[stockIndex].stock = stock.stock;
+        } else {
+          product.stockByLocation.push({ locationId: stock.locationId, stock: stock.stock });
+        }
       }
-      product.stockByLocation = stockByLocation;
     }
 
     await product.save();
+    console.log('Produit mis à jour:', product);
 
     res.status(200).json({ message: 'Produit mis à jour avec succès', product });
   } catch (error) {
+    console.error('Erreur lors de la mise à jour du produit:', error);
     res.status(500).json({ message: 'Erreur lors de la mise à jour du produit', error: error.message });
   }
 };
@@ -288,12 +268,10 @@ exports.deleteProduct = async (req, res) => {
       return res.status(404).json({ message: 'Produit non trouvé' });
     }
 
-    // Vérifier les autorisations (admin ou validateur avec rôle "stock_manager")
-    if (req.user.role !== 'admin' && !(req.user.role === 'stock_manager' && req.user.supermarketId === product.supermarketId.toString())) {
+    if (!req.user.roles.includes('admin') && !(req.user.roles.includes('stock_manager') && req.user.supermarketId === product.supermarketId.toString())) {
       return res.status(403).json({ message: 'Accès réservé à l’administrateur ou au gestionnaire de stock' });
     }
 
-    // Vérifier que le supermarché existe
     const supermarket = await Supermarket.findById(product.supermarketId);
     if (!supermarket) {
       return res.status(404).json({ message: 'Supermarché non trouvé' });

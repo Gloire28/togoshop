@@ -59,7 +59,7 @@ const orderSchema = new mongoose.Schema({
       required: false,
       default: 1.2314,
     },
-    instructions: { // Nouveau champ
+    instructions: {
       type: String,
       required: false,
       default: '',
@@ -72,7 +72,7 @@ const orderSchema = new mongoose.Schema({
   },
   deliveryType: {
     type: String,
-    enum: ['standard', 'evening', 'store_pickup'],
+    enum: ['standard', 'evening', 'retrait'],
     default: 'standard',
   },
   comments: {
@@ -80,9 +80,9 @@ const orderSchema = new mongoose.Schema({
     default: '',
     trim: true,
   },
-  totalAmount: {
+  subtotal: { 
     type: Number,
-    required: true,
+    default: 0,
   },
   deliveryFee: {
     type: Number,
@@ -91,6 +91,14 @@ const orderSchema = new mongoose.Schema({
   additionalFees: {
     type: Number,
     default: 0,
+  },
+  serviceFee: { 
+    type: Number,
+    default: 0,
+  },
+  totalAmount: {
+    type: Number,
+    required: true,
   },
   queuePosition: {
     type: Number,
@@ -103,7 +111,7 @@ const orderSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['cart_in_progress', 'pending_validation', 'awaiting_validator', 'validated', 'in_delivery', 'delivered', 'cancelled'],
+    enum: ['cart_in_progress', 'pending_validation', 'awaiting_validator', 'ready_for_delivery', 'validated', 'ready_for_pickup', 'in_delivery', 'delivered', 'cancelled'],
     default: 'cart_in_progress',
   },
   validatorId: {
@@ -115,6 +123,19 @@ const orderSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Driver',
     required: false,
+  },
+  priority: {
+    type: Number,
+    default: 2,
+    enum: [1, 2],
+  },
+  zoneId: {
+    type: String,
+    default: '',
+  },
+  clientValidation: {
+    type: Boolean,
+    default: false,
   },
   createdAt: {
     type: Date,
