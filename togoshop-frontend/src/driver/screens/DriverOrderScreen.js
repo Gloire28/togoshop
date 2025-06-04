@@ -1,21 +1,38 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, Alert, TouchableOpacity } from 'react-native';
-import LinearGradient from 'react-native-linear-gradient';
+import {
+  View,
+  Text,
+  StyleSheet,
+  FlatList,
+  ActivityIndicator,
+  Alert,
+  TouchableOpacity,
+} from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { getDriverOrders, acceptOrder, rejectOrder, updateDriverOrderStatus } from '../../shared/services/api';
+import { getDriverOrders, acceptOrder, rejectOrder, updateDriverOrderStatus, reportDeliveryIssue } from '../../shared/services/api';
 
 export default function DriverOrderScreen() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [currentLocation] = useState({ lat: 6.1700, lng: 1.2300 }); // Position simulée (ex. Lomé)
 
   useEffect(() => {
+    console.log('useEffect appelé pour fetchOrders');
     fetchOrders();
+
+    // Simulation de mise à jour toutes les 2 minutes
+    const locationInterval = setInterval(() => {
+      console.log('Mise à jour simulée de la position toutes les 2 minutes');
+    }, 120000); // 2 minutes
+
+    return () => clearInterval(locationInterval);
   }, []);
 
   const fetchOrders = async () => {
     setLoading(true);
     try {
       const response = await getDriverOrders();
+      console.log('Données reçues par fetchOrders:', response);
       setOrders(response || []);
     } catch (error) {
       Alert.alert('Erreur', 'Impossible de charger les commandes');
@@ -44,16 +61,6 @@ export default function DriverOrderScreen() {
     }
   };
 
-  const markAsDelivered = async (orderId) => {
-    try {
-      await updateDriverOrderStatus(orderId, 'delivered');
-      Alert.alert('Succès', 'Commande marquée comme livrée');
-      fetchOrders();
-    } catch (error) {
-      Alert.alert('Erreur', 'Impossible de mettre à jour le statut');
-    }
-  };
-
   const markAsInDelivery = async (orderId) => {
     try {
       await updateDriverOrderStatus(orderId, 'in_delivery');
@@ -64,234 +71,470 @@ export default function DriverOrderScreen() {
     }
   };
 
+  const markAsDelivered = async (orderId) => {
+    try {
+      await updateDriverOrderStatus(orderId, 'delivered');
+      Alert.alert('Succès', 'Commande marquée comme livrée');
+      fetchOrders();
+    } catch (error) {
+      Alert.alert('Erreur', 'Impossible de mettre à jour le statut');
+    }
+  };
+
+  const reportDeliveryIssueHandler = async (orderId, issueDetails) => {
+    try {
+      await reportDeliveryIssue(orderId, issueDetails);
+      Alert.alert('Succès', 'Problème signalé avec succès');
+      fetchOrders();
+    } catch (error) {
+      Alert.alert('Erreur', 'Impossible de signaler le problème');
+    }
+  };
+
+  // Fonction pour calculer la distance euclidienne (en km)
+  const calculateDistance = (lat1, lng1, lat2, lng2) => {
+    if (!lat1 || !lng1 || !lat2 || !lng2) return 0;
+
+    const R = 6371; // Rayon de la Terre en km
+    const dLat = (lat2 - lat1) * (Math.PI / 180);
+    const dLng = (lng2 - lng1) * (Math.PI / 180);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * (Math.PI / 180)) *
+        Math.cos(lat2 * (Math.PI / 180)) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c; // Distance en km
+    return distance.toFixed(2); // Arrondi à 2 décimales
+  };
+
+  // Fonction pour estimer le temps d’arrivée (vitesse = 40 km/h)
+  const estimateTime = (distance) => {
+    const speed = 40; // Vitesse moyenne en km/h
+    const timeInHours = distance / speed; // Temps en heures
+    const timeInMinutes = timeInHours * 60; // Temps en minutes
+    return Math.max(1, Math.round(timeInMinutes)); // Minimum 1 minute
+  };
+
+  // Fonction pour déterminer la direction
+  const getDirection = (lat1, lng1, lat2, lng2) => {
+    if (!lat1 || !lng1 || !lat2 || !lng2) return 'Inconnue';
+
+    const dLat = lat2 - lat1;
+    const dLng = lng2 - lng1;
+
+    if (dLat > 0 && dLng > 0) return 'Vers le nord-est';
+    if (dLat > 0 && dLng < 0) return 'Vers le nord-ouest';
+    if (dLat < 0 && dLng > 0) return 'Vers le sud-est';
+    if (dLat < 0 && dLng < 0) return 'Vers le sud-ouest';
+    if (dLat > 0 && dLng === 0) return 'Vers le nord';
+    if (dLat < 0 && dLng === 0) return 'Vers le sud';
+    if (dLat === 0 && dLng > 0) return 'Vers l’est';
+    if (dLat === 0 && dLng < 0) return 'Vers l’ouest';
+    return 'Inconnue';
+  };
+
   const renderOrder = ({ item }) => {
-    const statusColors = {
-      validated: '#F97316', // Orange pour en attente
-      ready_for_pickup: '#3B82F6', // Bleu pour prête
-      in_delivery: '#10B981', // Vert pour en livraison
+    console.log('Rendu de l\'ordre:', item); // Débogage pour vérifier le statut
+    const statusStyles = {
+      validated: { backgroundColor: '#FCD34D', icon: 'clock-outline', label: 'Assignée' },
+      ready_for_pickup: { backgroundColor: '#60A5FA', icon: 'package-variant', label: 'Prête' },
+      in_delivery: { backgroundColor: '#34D399', icon: 'truck-delivery', label: 'En livraison' },
+      delivered: { backgroundColor: '#A3BFFA', icon: 'check-circle', label: 'Livré' },
     };
 
-    const statusIcons = {
-      validated: 'clock-outline',
-      ready_for_pickup: 'package-variant',
-      in_delivery: 'truck-delivery',
-    };
+    const status = statusStyles[item.status] || { backgroundColor: '#9CA3AF', icon: 'help-circle', label: 'Inconnu' };
+
+    // Trouver l'adresse et les coordonnées du supermarché via locationId
+    const supermarketLocation = item.supermarketId?.locations?.find(loc => loc._id === item.locationId);
+    const supermarketAddress = supermarketLocation?.address || 'Adresse non définie';
+    const supermarketLat = supermarketLocation?.latitude;
+    const supermarketLng = supermarketLocation?.longitude;
+
+    // Coordonnées de livraison
+    const deliveryLat = item.deliveryAddress?.lat;
+    const deliveryLng = item.deliveryAddress?.lng;
+
+    // Calcul de la distance et direction selon le statut
+    let distance = 0;
+    let direction = 'Inconnue';
+    let estimatedTime = '';
+
+    if (currentLocation) {
+      if (item.status === 'ready_for_pickup' && supermarketLat && supermarketLng) {
+        distance = calculateDistance(
+          currentLocation.lat,
+          currentLocation.lng,
+          supermarketLat,
+          supermarketLng
+        );
+        direction = getDirection(
+          currentLocation.lat,
+          currentLocation.lng,
+          supermarketLat,
+          supermarketLng
+        );
+        const time = estimateTime(distance);
+        estimatedTime = `Temps estimé : ${time} min`;
+      } else if (item.status === 'in_delivery' && deliveryLat && deliveryLng) {
+        distance = calculateDistance(
+          currentLocation.lat,
+          currentLocation.lng,
+          deliveryLat,
+          deliveryLng
+        );
+        direction = getDirection(
+          currentLocation.lat,
+          currentLocation.lng,
+          deliveryLat,
+          deliveryLng
+        );
+        const time = estimateTime(distance);
+        estimatedTime = `Temps estimé : ${time} min`;
+      }
+    }
+
+    // Affichage de la récupération avec distance et direction
+    const retrievalText = item.status === 'ready_for_pickup' || item.status === 'in_delivery'
+      ? `Récupération : ${item.supermarketId?.name || 'Supermarché Inconnu'} (${supermarketAddress}, ~${distance} km, ${direction})`
+      : `Récupération : ${item.supermarketId?.name || 'Supermarché Inconnu'} (${supermarketAddress})`;
+
+    // Highlight si autre commande existe après 'delivered'
+    const isNextOrder = item.status === 'delivered' && orders.some(o => o.status !== 'delivered');
+    const cardStyle = isNextOrder ? [styles.orderCard, styles.highlightCard] : styles.orderCard;
 
     return (
-      <View style={styles.orderCard}>
+      <View style={cardStyle}>
+        {/* En-tête avec ID et statut */}
         <View style={styles.orderHeader}>
-          <Text style={styles.orderId}>Commande #{item._id.substring(0, 8)}...</Text>
-          <View style={[styles.statusBadge, { backgroundColor: statusColors[item.status] || '#6B7280' }]}>
-            <Icon name={statusIcons[item.status] || 'help-circle'} size={16} color="#fff" style={styles.statusIcon} />
-            <Text style={styles.statusText}>
-              {item.status === 'validated' ? 'En attente' : item.status === 'ready_for_pickup' ? 'Prête' : 'En livraison'}
-            </Text>
+          <Text style={styles.orderId}># {item._id.substring(0, 8)}...</Text>
+          <View style={[styles.statusBadge, { backgroundColor: status.backgroundColor }]}>
+            <Icon name={status.icon} size={14} color="#fff" style={styles.statusIcon} />
+            <Text style={styles.statusText}>{status.label}</Text>
           </View>
         </View>
-        <Text style={styles.orderText}>
-          <Icon name="account" size={16} color="#1E3A8A" /> Client: {item.clientId?.name || 'Inconnu'}
-        </Text>
-        <Text style={styles.orderText}>
-          <Icon name="map-marker" size={16} color="#1E3A8A" /> Adresse: {item.deliveryAddress?.address}
-        </Text>
-        <Text style={styles.orderText}>
-          <Icon name="cash" size={16} color="#1E3A8A" /> Total: {item.totalAmount} FCFA
-        </Text>
-        <Text style={styles.orderText}>
-          <Icon name="truck" size={16} color="#1E3A8A" /> Frais: {item.deliveryFee} FCFA
-        </Text>
 
-        {/* Afficher les commandes groupées dans la même zone */}
-        {item.zoneId && item.status === 'ready_for_pickup' && (
-          <Text style={styles.zoneText}>
-            <Icon name="group" size={16} color="#F97316" /> Zone #{item.zoneId.substring(0, 8)}... ({orders.filter(o => o.zoneId === item.zoneId).length} commandes)
-          </Text>
-        )}
+        {/* Affichage spécifique selon le statut */}
+        {item.status === 'validated' ? (
+          <>
+            {/* Informations pour validated */}
+            <View style={styles.orderDetails}>
+              <Text style={styles.orderText}>
+                <Icon name="map-marker" size={16} color="#4B5563" /> 
+                {item.deliveryAddress?.address || 'Adresse non définie'} 
+                {item.deliveryAddress?.instructions ? ` (${item.deliveryAddress.instructions})` : ''}
+              </Text>
+              <Text style={styles.orderText}>
+                <Icon name="cash" size={16} color="#4B5563" /> Paiement: {item.paymentMethod || 'Non défini'}
+              </Text>
+              <Text style={styles.orderText}>
+                <Icon name="truck" size={16} color="#4B5563" /> Frais: {item.deliveryFee} FCFA
+              </Text>
+              <Text style={styles.orderText}>
+                <Icon name="account" size={16} color="#4B5563" /> {item.clientId?.name || item.clientId?.email || 'Client Inconnu'}
+              </Text>
+              <Text style={styles.orderText}>
+                <Icon name="store" size={16} color="#4B5563" /> 
+                {item.supermarketId?.name || 'Supermarché Inconnu'} ({supermarketAddress})
+              </Text>
+            </View>
 
-        {/* Actions selon le statut */}
-        {item.status === 'validated' && (
-          <View style={styles.actionButtons}>
-            <TouchableOpacity
-              style={[styles.button, styles.acceptButton]}
-              onPress={() => acceptOrderHandler(item._id)}
-            >
-              <Icon name="check" size={16} color="#fff" style={styles.buttonIcon} />
-              <Text style={styles.buttonText}>Accepter</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.button, styles.rejectButton]}
-              onPress={() => rejectOrderHandler(item._id)}
-            >
-              <Icon name="close" size={16} color="#fff" style={styles.buttonIcon} />
-              <Text style={styles.buttonText}>Refuser</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-        {item.status === 'ready_for_pickup' && (
-          <TouchableOpacity
-            style={[styles.button, styles.inDeliveryButton]}
-            onPress={() => markAsInDelivery(item._id)}
-          >
-            <Icon name="truck-delivery" size={16} color="#fff" style={styles.buttonIcon} />
-            <Text style={styles.buttonText}>Démarrer Livraison</Text>
-          </TouchableOpacity>
-        )}
-        {item.status === 'in_delivery' && (
-          <TouchableOpacity
-            style={[styles.button, styles.deliveredButton]}
-            onPress={() => markAsDelivered(item._id)}
-          >
-            <Icon name="check-circle" size={16} color="#fff" style={styles.buttonIcon} />
-            <Text style={styles.buttonText}>Marquer comme Livrée</Text>
-          </TouchableOpacity>
+            {/* Actions pour validated */}
+            <View style={styles.actionContainer}>
+              <View style={styles.actionRow}>
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.acceptButton]}
+                  onPress={() => acceptOrderHandler(item._id)}
+                >
+                  <Icon name="check" size={16} color="#fff" style={styles.buttonIcon} />
+                  <Text style={styles.buttonText}>Accepter</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.rejectButton]}
+                  onPress={() => rejectOrderHandler(item._id)}
+                >
+                  <Icon name="close" size={16} color="#fff" style={styles.buttonIcon} />
+                  <Text style={styles.buttonText}>Rejeter</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </>
+        ) : (
+          <>
+            {/* Informations pour les autres statuts */}
+            <View style={styles.orderDetails}>
+              <Text style={styles.orderText}>
+                <Icon name="map-marker" size={16} color="#4B5563" /> 
+                {item.deliveryAddress?.address || 'Adresse non définie'} 
+                {item.deliveryAddress?.instructions ? ` (${item.deliveryAddress.instructions})` : ''}
+              </Text>
+              <Text style={styles.orderText}>
+                <Icon name="cash" size={16} color="#4B5563" /> Paiement: {item.paymentMethod || 'Non défini'}
+              </Text>
+              <Text style={styles.orderText}>
+                <Icon name="truck" size={16} color="#4B5563" /> Frais: {item.deliveryFee} FCFA
+              </Text>
+              <Text style={styles.orderText}>
+                <Icon name="account" size={16} color="#4B5563" /> {item.clientId?.name || item.clientId?.email || 'Client Inconnu'}
+              </Text>
+              <Text style={styles.orderText}>
+                <Icon name="store" size={16} color="#4B5563" /> {retrievalText}
+              </Text>
+              {estimatedTime && <Text style={styles.orderText}>{estimatedTime}</Text>}
+              {item.status === 'delivered' && (
+                <Text style={styles.orderText}>
+                  <Icon name="lock" size={16} color="#4B5563" /> Code: {item.validationCode}
+                </Text>
+              )}
+              {item.status === 'delivered' && isNextOrder && (
+                <Text style={styles.nextOrderText}>Prochaine commande disponible ! ({orders.length - 1} restantes)</Text>
+              )}
+            </View>
+
+            {/* Actions pour les autres statuts */}
+            <View style={styles.actionContainer}>
+              {item.status === 'ready_for_pickup' && (
+                <TouchableOpacity
+                  style={[styles.actionButton, styles.inDeliveryButton]}
+                  onPress={() => markAsInDelivery(item._id)}
+                >
+                  <Icon name="truck-delivery" size={16} color="#fff" style={styles.buttonIcon} />
+                  <Text style={styles.buttonText}>Marquer comme Prête</Text>
+                </TouchableOpacity>
+              )}
+              {item.status === 'in_delivery' && (
+                <View style={styles.actionRow}>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.deliveredButton]}
+                    onPress={() => markAsDelivered(item._id)}
+                  >
+                    <Icon name="check-circle" size={16} color="#fff" style={styles.buttonIcon} />
+                    <Text style={styles.buttonText}>Marquer comme Livré</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.reportButton]}
+                    onPress={() =>
+                      Alert.prompt(
+                        'Signaler un Problème',
+                        'Décrivez le problème',
+                        [
+                          { text: 'Annuler', style: 'cancel' },
+                          {
+                            text: 'Envoyer',
+                            onPress: (issueDetails) => reportDeliveryIssueHandler(item._id, issueDetails || 'Problème non spécifié'),
+                          },
+                        ],
+                        'plain-text'
+                      )
+                    }
+                  >
+                    <Icon name="alert-circle" size={16} color="#fff" style={styles.buttonIcon} />
+                    <Text style={styles.buttonText}>Signaler</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+              {item.status === 'delivered' && isNextOrder && (
+                <View style={styles.actionRow}>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.deliveredButton]}
+                    onPress={() => markAsDelivered(item._id)}
+                  >
+                    <Icon name="check-circle" size={16} color="#fff" style={styles.buttonIcon} />
+                    <Text style={styles.buttonText}>Marquer comme Livré</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.actionButton, styles.reportButton]}
+                    onPress={() =>
+                      Alert.prompt(
+                        'Signaler un Problème',
+                        'Décrivez le problème',
+                        [
+                          { text: 'Annuler', style: 'cancel' },
+                          {
+                            text: 'Envoyer',
+                            onPress: (issueDetails) => reportDeliveryIssueHandler(item._id, issueDetails || 'Problème non spécifié'),
+                          },
+                        ],
+                        'plain-text'
+                      )
+                    }
+                  >
+                    <Icon name="alert-circle" size={16} color="#fff" style={styles.buttonIcon} />
+                    <Text style={styles.buttonText}>Signaler</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </>
         )}
       </View>
     );
   };
 
   return (
-    <LinearGradient
-      colors={['#1E3A8A', '#10B981']}
-      style={styles.container}
-    >
-      <Text style={styles.title}>Mes Commandes</Text>
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Mes Commandes</Text>
+      </View>
       {loading ? (
-        <ActivityIndicator size="large" color="#fff" />
+        <ActivityIndicator size="large" color="#4B5563" style={styles.loader} />
       ) : orders.length === 0 ? (
         <View style={styles.noOrdersContainer}>
-          <Icon name="package-variant-closed" size={50} color="#E5E7EB" />
-          <Text style={styles.noOrders}>Aucune commande en cours</Text>
+          <Icon name="package-variant-closed" size={60} color="#D1D5DB" />
+          <Text style={styles.noOrdersText}>Aucune commande en cours</Text>
         </View>
       ) : (
         <FlatList
           data={orders}
           renderItem={renderOrder}
           keyExtractor={(item) => item._id}
-          style={styles.orderList}
+          contentContainerStyle={styles.orderList}
         />
       )}
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
-    paddingTop: 60,
+    backgroundColor: '#F9FAFB',
+    paddingHorizontal: 16,
+    paddingTop: 50,
+  },
+  header: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+    marginBottom: 20,
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#fff',
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1E293B',
     textAlign: 'center',
-    marginBottom: 20,
     fontFamily: 'Poppins-Bold',
   },
-  orderList: {
+  loader: {
     flex: 1,
+    justifyContent: 'center',
+  },
+  orderList: {
+    paddingBottom: 20,
   },
   orderCard: {
-    backgroundColor: '#fff',
-    borderRadius: 15,
-    padding: 20,
-    marginBottom: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 5,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  highlightCard: {
+    borderWidth: 2,
+    borderColor: '#FCD34D',
   },
   orderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-    paddingBottom: 10,
+    marginBottom: 12,
   },
   orderId: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
-    color: '#1E3A8A',
+    color: '#1E293B',
     fontFamily: 'Poppins-SemiBold',
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    borderRadius: 16,
   },
   statusIcon: {
-    marginRight: 5,
+    marginRight: 4,
   },
   statusText: {
     color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '500',
     fontFamily: 'Poppins-Medium',
+  },
+  orderDetails: {
+    marginBottom: 12,
   },
   orderText: {
-    fontSize: 16,
+    fontSize: 14,
+    color: '#4B5563',
     marginBottom: 8,
-    color: '#1E3A8A',
     fontFamily: 'Poppins-Regular',
   },
-  zoneText: {
-    fontSize: 14,
-    color: '#F97316',
-    marginBottom: 10,
+  nextOrderText: {
+    fontSize: 12,
+    color: '#FCD34D',
     fontFamily: 'Poppins-Medium',
+    marginTop: 8,
   },
-  actionButtons: {
+  actionContainer: {
+    marginTop: 12,
+  },
+  actionRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    marginBottom: 8,
   },
-  button: {
+  actionButton: {
     flexDirection: 'row',
-    paddingVertical: 12,
-    borderRadius: 25,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    flex: 1,
+    marginHorizontal: 4,
   },
   acceptButton: {
-    backgroundColor: '#10B981',
-    flex: 1,
-    marginRight: 5,
+    backgroundColor: '#34D399',
   },
   rejectButton: {
-    backgroundColor: '#EF4444',
-    flex: 1,
-    marginLeft: 5,
+    backgroundColor: '#F87171',
   },
   inDeliveryButton: {
-    backgroundColor: '#3B82F6',
+    backgroundColor: '#60A5FA',
+    width: '100%',
   },
   deliveredButton: {
-    backgroundColor: '#10B981',
+    backgroundColor: '#34D399',
+  },
+  reportButton: {
+    backgroundColor: '#F87171',
   },
   buttonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     fontFamily: 'Poppins-SemiBold',
+    marginLeft: 6,
   },
   buttonIcon: {
-    marginRight: 8,
+    marginRight: 6,
   },
   noOrdersContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
-  noOrders: {
-    fontSize: 18,
-    textAlign: 'center',
-    color: '#E5E7EB',
-    marginTop: 20,
+  noOrdersText: {
+    fontSize: 16,
+    color: '#6B7280',
+    marginTop: 12,
     fontFamily: 'Poppins-Regular',
   },
 });

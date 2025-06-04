@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BASE_URL = 'http://192.168.1.74:5000/api';
+const BASE_URL = 'http://192.168.1.64:5000/api';
 
 export const apiRequest = async (endpoint, options = {}) => {
   const { method = 'GET', body = null, isFormData = false } = options;
@@ -8,6 +8,7 @@ export const apiRequest = async (endpoint, options = {}) => {
   try {
     const token = await AsyncStorage.getItem('token');
     console.log('Token envoyé dans la requête:', token);
+    console.log('Requête envoyée:', `${BASE_URL}${endpoint}`, { method, headers: { 'Content-Type': isFormData ? 'multipart/form-data' : 'application/json', ...(token && { Authorization: `Bearer ${token}` }) } });
 
     if (!token && !isFormData && endpoint !== '/auth/login' && endpoint !== '/drivers/login') {
       throw new Error('Aucun token trouvé dans AsyncStorage');
@@ -23,6 +24,7 @@ export const apiRequest = async (endpoint, options = {}) => {
     });
 
     const text = await response.text();
+    console.log('Réponse brute de l\'API:', text);
     if (!response.ok) {
       if (response.status === 405) {
         throw new Error(`Méthode non autorisée : ${method} sur ${endpoint}`);
@@ -122,8 +124,8 @@ export const getDriverInfo = () => apiRequest('/drivers/me', { method: 'GET' });
 // Mettre à jour la position du livreur
 export const updateDriverLocation = (lat, lng) => apiRequest('/drivers/location', { method: 'PUT', body: { lat, lng } });
 
-// Récupérer les commandes assignées au livreur
-export const getDriverOrders = () => apiRequest('/orders/driver/me', { method: 'GET' });
+// Récupérer les commandes assignées au livreur, incluant les statuts pertinents
+export const getDriverOrders = () => apiRequest('/orders/driver/me?statuses=validated,ready_for_pickup,in_delivery', { method: 'GET' });
 
 // Activer/Désactiver la détectabilité du livreur
 export const toggleDriverDiscoverable = () => apiRequest('/drivers/discoverable', { method: 'PUT' });
@@ -146,10 +148,21 @@ export const updateDriverOrderStatus = (orderId, status) => {
   return apiRequest('/drivers/orders/status', { method: 'PUT', body: { orderId, status } });
 };
 
+export const reportDeliveryIssue = (orderId, issueDetails) => {
+  if (!orderId || !issueDetails) throw new Error('orderId ou issueDetails manquant pour reportDeliveryIssue');
+  return apiRequest('/drivers/orders/report-issue', { method: 'POST', body: { orderId, issueDetails } });
+};
+
 // Valider une livraison (côté client)
 export const validateDelivery = (orderId) => {
   if (!orderId) throw new Error('orderId manquant pour validateDelivery');
   return apiRequest(`/orders/${orderId}/validate-delivery`, { method: 'POST', body: { orderId } });
+};
+
+//renvoie de code de validation pour le client, en cas de problème avec la validation de la commande)
+export const resendValidationCode = (orderId) => {
+  if (!orderId) throw new Error('orderId manquant pour resendValidationCode');
+  return apiRequest(`/orders/${orderId}/resend-validation-code`, { method: 'POST', body: { orderId } });
 };
 
 // Récupérer les détails d’une commande (pour le suivi client)

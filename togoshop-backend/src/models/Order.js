@@ -111,7 +111,17 @@ const orderSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['cart_in_progress', 'pending_validation', 'awaiting_validator', 'ready_for_delivery', 'validated', 'ready_for_pickup', 'in_delivery', 'delivered', 'cancelled'],
+    enum: [
+      'cart_in_progress',
+      'pending_validation',
+      'awaiting_validator',
+      'validated',
+      'ready_for_pickup', 
+      'in_delivery',
+      'delivered',
+      'cancelled',
+      'delivery_issue', 
+    ],
     default: 'cart_in_progress',
   },
   validatorId: {
@@ -136,6 +146,19 @@ const orderSchema = new mongoose.Schema({
   clientValidation: {
     type: Boolean,
     default: false,
+  },
+  paymentMethod: {
+  type: String,
+  enum: ['cash', 'mobile_money', 'card'],
+  required: true,
+  },
+  validationCode: { 
+    type: String,
+    default: () => Math.random().toString(36).substring(2, 8).toUpperCase(), 
+  },
+  acceptedAt: { 
+    type: Date,
+    required: false,
   },
   createdAt: {
     type: Date,

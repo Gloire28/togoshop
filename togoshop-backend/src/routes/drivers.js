@@ -30,4 +30,7 @@ router.post('/orders/reject', auth, driversController.rejectOrder);
 // Mettre à jour le statut d'une commande (par le livreur)
 router.put('/orders/status', auth, driversController.updateOrderStatus);
 
+//signaler un probleme de livraison
+router.post('/orders/report-issue', auth, driversController.reportDeliveryIssue);
+
 module.exports = router;

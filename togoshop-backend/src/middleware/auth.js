@@ -13,6 +13,12 @@ const permissions = [
   { path: '/me/availability', method: 'PUT', baseUrl: '/api/managers', roles: ['manager', 'order_validator', 'stock_manager'] },
   { path: '/:id/submit', method: 'PUT', baseUrl: '/api/orders', roles: ['client'] },
   { path: '/:id/validate-delivery', method: 'POST', baseUrl: '/api/orders', roles: ['client'] },
+  { path: '/:id/resend-validation-code', method: 'POST', baseUrl: '/api/orders', roles: ['client'], additionalCheck: async (req) => {
+  const orderId = req.params.id;
+  const order = await Order.findById(orderId);
+  if (!order) return false;
+  return order.clientId.toString() === req.user.id && order.status === 'delivered';
+  }},
   { path: '/:id', method: 'GET', baseUrl: '/api/orders', roles: ['client'], additionalCheck: async (req) => {
     const orderId = req.params.id;
     const order = await Order.findById(orderId);
@@ -49,6 +55,7 @@ const permissions = [
   { path: '/orders/accept', method: 'POST', baseUrl: '/api/drivers', roles: ['driver'] },
   { path: '/orders/reject', method: 'POST', baseUrl: '/api/drivers', roles: ['driver'] },
   { path: '/orders/status', method: 'PUT', baseUrl: '/api/drivers', roles: ['driver'] },
+  { path: '/orders/report-issue', method: 'POST', baseUrl: '/api/drivers', roles: ['driver'] },
   { path: '/driver/me', method: 'GET', baseUrl: '/api/orders', roles: ['driver'] },
   { path: '/register', method: 'POST', baseUrl: '/api/drivers', roles: ['admin'] },
   { path: '/', method: 'GET', baseUrl: '/api/supermarkets', roles: ['client'] },
@@ -69,6 +76,7 @@ const getActionDescription = (method, baseUrl, path) => {
     if (path === 'supermarket/:supermarketId/pending' && method === 'GET') return 'Récupération des commandes en attente du supermarché';
     if (path === ':id/submit' && method === 'PUT') return 'Soumission d\'une commande';
     if (path === ':id/validate-delivery' && method === 'POST') return 'Validation de la livraison d\'une commande';
+    if (path === ':id/resend-validation-code' && method === 'POST') return 'Renvoi du code de validation pour une commande';
     if (path === ':id' && method === 'GET') return 'Récupération des détails d\'une commande';
     if (path === ':id' && method === 'PUT') return 'Mise à jour d\'une commande';
     if (path === ':id/status' && method === 'PUT') return 'Mise à jour du statut d\'une commande';
@@ -96,6 +104,7 @@ const getActionDescription = (method, baseUrl, path) => {
     if (path === 'orders/accept' && method === 'POST') return 'Acceptation d\'une commande par le livreur';
     if (path === 'orders/reject' && method === 'POST') return 'Rejet d\'une commande par le livreur';
     if (path === 'orders/status' && method === 'PUT') return 'Mise à jour du statut d\'une commande par le livreur';
+    if (path === 'orders/report-issue' && method === 'POST') return 'Signalement d\'un problème de livraison par le livreur';
     if (path === 'register' && method === 'POST') return 'Inscription d\'un nouveau livreur';
   }
   if (baseUrl === '/api/supermarkets' && method === 'GET') return 'Récupération de la liste des supermarchés';

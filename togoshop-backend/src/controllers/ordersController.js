@@ -326,13 +326,14 @@ exports.getUserOrderHistory = async (req, res) => {
   }
 };
 
-// Récupérer toutes les commandes de l'utilisateur connecté
+// Récupérer toutes les commandes de l'utilisateur
 exports.getMyOrders = async (req, res) => {
   try {
     const userId = req.user.id;
     console.log(`Récupération de toutes les commandes pour utilisateur ${userId}`);
 
     const orders = await Order.find({ clientId: userId })
+      .select('paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId') // Projection explicite
       .populate('products.productId')
       .populate('supermarketId')
       .populate('driverId')
@@ -348,6 +349,42 @@ exports.getMyOrders = async (req, res) => {
   } catch (error) {
     console.error('Erreur lors de la récupération des commandes:', error.message);
     res.status(500).json({ message: 'Erreur lors de la récupération des commandes', error: error.message });
+  }
+};
+
+// Récupérer toutes les commandes de l'utilisateur connecté
+exports.getOrderById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const order = await Order.findById(id)
+      .select('paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId') // Projection explicite
+      .populate('products.productId')
+      .populate('supermarketId');
+
+    if (!order) {
+      return res.status(404).json({ message: 'Commande non trouvée' });
+    }
+
+    if (req.user.role !== 'admin' && order.clientId.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Accès non autorisé' });
+    }
+
+    let zoneOrders = [];
+    if (order.zoneId && order.status === 'ready_for_pickup' && req.user.role === 'driver') {
+      zoneOrders = await Order.find({
+        zoneId: order.zoneId,
+        status: 'ready_for_pickup',
+        deliveryType: { $ne: 'evening' },
+      })
+        .select('paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId') // Projection pour zoneOrders
+        .populate('products.productId')
+        .populate('supermarketId');
+    }
+
+    res.status(200).json({ order, zoneOrders });
+  } catch (error) {
+    res.status(500).json({ message: 'Erreur lors de la récupération de la commande', error: error.message });
   }
 };
 
@@ -453,14 +490,14 @@ exports.updateOrderStatus = async (req, res) => {
     const statusTransitions = {
       awaiting_validator: ['pending_validation', 'cancelled'],
       pending_validation: ['validated', 'cancelled'],
-      validated: ['ready_for_delivery', 'cancelled'],
-      ready_for_delivery: ['in_delivery', 'cancelled'],
+      validated: ['ready_for_pickup', 'cancelled'],
+      ready_for_pickup: ['in_delivery', 'cancelled'],
       in_delivery: ['delivered', 'cancelled'],
       delivered: [],
       cancelled: [],
     };
 
-    const validStatuses = ['awaiting_validator', 'pending_validation', 'validated', 'ready_for_delivery', 'in_delivery', 'delivered', 'cancelled'];
+    const validStatuses = ['awaiting_validator', 'pending_validation', 'validated', 'ready_for_pickup', 'in_delivery', 'delivered', 'cancelled'];
     if (!status || !validStatuses.includes(status)) {
       console.log(`Statut invalide: ${status}`);
       return res.status(400).json({ message: 'Statut invalide' });
@@ -524,35 +561,6 @@ exports.updateOrderStatus = async (req, res) => {
         console.log(`Nouveau stock après décrémentation: ${stockEntry.stock}`);
         await product.save();
         console.log(`Produit sauvegardé après mise à jour du stock:`, product);
-      }
-    }
-
-    if (status === 'ready_for_delivery' && !order.driverId) {
-      try {
-        const supermarket = await Supermarket.findOne({ _id: order.supermarketId });
-        if (!supermarket) {
-          console.log(`Supermarché ${order.supermarketId} non trouvé`);
-          return res.status(404).json({ message: 'Supermarché non trouvé' });
-        }
-
-        const location = supermarket.locations.find(loc => loc._id.toString() === order.locationId);
-        if (!location) {
-          console.log(`Emplacement ${order.locationId} non trouvé pour le supermarché ${order.supermarketId}`);
-          return res.status(404).json({ message: 'Emplacement non trouvé pour ce supermarché' });
-        }
-
-        const supermarketLocation = { lat: location.latitude, lng: location.longitude };
-        console.log(`Position du supermarché:`, supermarketLocation);
-
-        const managerLocation = req.user.location || { lat: order.deliveryAddress.lat, lng: order.deliveryAddress.lng };
-        console.log(`Position du manager:`, managerLocation);
-
-        const driverId = await assignDriver(order._id, managerLocation);
-        console.log(`Livreur assigné, driverId: ${driverId}`);
-        order.driverId = driverId;
-      } catch (error) {
-        console.error('Erreur lors de l\'assignation du livreur:', error.message);
-        return res.status(500).json({ message: 'Erreur lors de l’assignation du livreur', error: error.message });
       }
     }
 
@@ -735,7 +743,8 @@ exports.submitOrder = async (req, res) => {
     order.serviceFee = serviceFee;
     order.totalAmount = totalAmount;
     order.deliveryType = deliveryType;
-    await order.save(); // Sauvegarder les modifications des frais
+    order.paymentMethod = paymentMethod; 
+    await order.save(); 
 
     // Créer le paiement
     const { paymentId, status: paymentStatus } = await createPayment(id, paymentMethod, clientPhone, req.user);
@@ -837,32 +846,89 @@ exports.getManagerOrders = async (req, res) => {
 // Valider la livraison (par le client)
 exports.validateDelivery = async (req, res) => {
   try {
-    const { orderId } = req.body;
+    const { orderId, validationCode } = req.body;
     let order = await Order.findById(orderId);
     if (!order || order.status !== 'delivered' || order.clientId.toString() !== req.user.id) {
       return res.status(403).json({ message: 'Accès non autorisé ou commande non prête pour validation' });
     }
 
+    if (!validationCode || validationCode !== order.validationCode) {
+      return res.status(400).json({ message: 'Code de validation incorrect' });
+    }
+
     order.clientValidation = true;
     await order.save();
+
+    if (order.driverId) {
+      const remainingOrders = await Order.countDocuments({
+        driverId: order.driverId,
+        status: { $in: ['ready_for_pickup', 'in_delivery', 'delivered'] },
+        clientValidation: false,
+      });
+      if (remainingOrders === 0) {
+        const driver = await Driver.findById(order.driverId);
+        if (driver) {
+          driver.status = 'available';
+          await driver.save();
+          console.log(`Livreur ${driver._id} repassé à available après validation complète`);
+        }
+      }
+    }
+
     await sendNotification(order.driverId, `Commande ${orderId} validée par le client.`);
 
     res.status(200).json({ message: 'Livraison validée', order });
   } catch (error) {
-    res.status(500).json({ message: 'Erreur', error: error.message });
+    console.error('Erreur lors de la validation de la livraison:', error.message);
+    res.status(500).json({ message: 'Erreur lors de la validation de la livraison', error: error.message });
   }
 };
+
+// Renvoyer le code de validation (par le client)
+exports.resendValidationCode = async (req, res) => {
+  try {
+    const { orderId } = req.body;
+    let order = await Order.findById(orderId);
+    if (!order || order.status !== 'delivered' || order.clientId.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Accès non autorisé ou commande non prête pour renvoi du code' });
+    }
+
+    await sendNotification(
+      order.clientId,
+      `Nouveau code de validation pour votre commande (${orderId}) : ${order.validationCode}. Veuillez valider votre livraison.`
+    );
+    order.updatedAt = Date.now();
+    await order.save();
+
+    res.status(200).json({ message: 'Code de validation renvoyé avec succès', orderId });
+  } catch (error) {
+    console.error('Erreur lors du renvoi du code de validation:', error.message);
+    res.status(500).json({ message: 'Erreur lors du renvoi du code de validation', error: error.message });
+  }
+};
+
 // Récupérer les commandes assignées au livreur connecté
 exports.getDriverOrders = async (req, res) => {
   try {
+    console.log('getDriverOrders appelé pour driverId:', req.user.id);
+    console.log('Paramètres de requête:', req.query);
+
     const driverId = req.user.id;
-    const orders = await Order.find({ driverId, status: { $in: ['in_delivery', 'ready_for_delivery'] } })
+    // Utiliser les statuts passés en paramètre, sinon défaut à ['validated', 'ready_for_pickup', 'in_delivery']
+    const statuses = req.query.statuses ? req.query.statuses.split(',') : ['validated', 'ready_for_pickup', 'in_delivery'];
+    console.log('Statuts utilisés pour le filtre:', statuses);
+
+    const orders = await Order.find({ driverId, status: { $in: statuses } })
+      .select('paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId') // Ajout de la projection explicite
       .populate('products.productId')
       .populate('supermarketId')
+      .populate('clientId') // Infos du client déjà inclus
       .sort('updatedAt');
+
+    console.log('Commandes trouvées:', orders.length ? orders : 'Aucune commande trouvée');
     res.status(200).json(orders);
   } catch (error) {
-    console.error('Erreur lors de la récupération des commandes du livreur:', error.message);
+    console.error('Erreur dans getDriverOrders:', error.message);
     res.status(500).json({ message: 'Erreur lors de la récupération des commandes', error: error.message });
   }
 };

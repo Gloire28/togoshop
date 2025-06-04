@@ -48,10 +48,10 @@ const assignDriver = async (orderId, managerLocation = null) => {
     const deliveryLocation = { lat: order.deliveryAddress.lat, lng: order.deliveryAddress.lng };
     const managerLoc = managerLocation || { lat: location.latitude, lng: location.longitude };
 
-    // Vérifier d'abord si un livreur a une zone compatible (rayon de 5 km)
+    // Vérifier d'abord si un livreur en pending_pickup a une zone compatible (rayon de 5 km)
     const existingDriver = await findDriverForZone(order);
     if (existingDriver) {
-      await Order.findByIdAndUpdate(orderId, { driverId: existingDriver._id });
+      await Order.findByIdAndUpdate(orderId, { driverId: existingDriver._id, zoneId: existingDriver.zoneId });
       return existingDriver._id;
     }
 
@@ -93,7 +93,7 @@ const assignDriver = async (orderId, managerLocation = null) => {
   }
 };
 
-// Vérifier si un livreur a une zone compatible (rayon de 5 km)
+// Vérifier si un livreur a une zone compatible (rayon de 5 km) et gérer le groupage
 const findDriverForZone = async (newOrder) => {
   const activeOrders = await Order.find({
     status: 'ready_for_pickup',
@@ -109,7 +109,7 @@ const findDriverForZone = async (newOrder) => {
 
     if (distance <= 5 && activeOrder.driverId) {
       const driver = await Driver.findById(activeOrder.driverId).lean();
-      if (!driver || driver.status !== 'busy') continue;
+      if (!driver || driver.status !== 'pending_pickup') continue;
 
       const driverOrders = await Order.countDocuments({
         driverId: activeOrder.driverId,
@@ -117,12 +117,40 @@ const findDriverForZone = async (newOrder) => {
       });
 
       if (driverOrders < 4) {
-        return driver;
+        return { _id: driver._id, zoneId: activeOrder.zoneId };
       }
     }
   }
 
   return null;
+};
+
+// Regrouper les commandes pour un livreur en pending_pickup
+const groupOrders = async (driverId, initialOrderId) => {
+  const initialOrder = await Order.findById(initialOrderId);
+  const ordersToGroup = await Order.find({
+    status: 'validated',
+    supermarketId: initialOrder.supermarketId,
+    locationId: initialOrder.locationId,
+    _id: { $ne: initialOrderId },
+  });
+
+  let groupedCount = 1; // Compte l’ordre initial
+  for (const order of ordersToGroup) {
+    const distance = calculateDistance(
+      { lat: initialOrder.deliveryAddress.lat, lng: initialOrder.deliveryAddress.lng },
+      { lat: order.deliveryAddress.lat, lng: order.deliveryAddress.lng }
+    );
+    if (distance <= 5 && groupedCount < 4) {
+      order.driverId = driverId;
+      order.zoneId = initialOrder.zoneId;
+      order.status = 'ready_for_pickup';
+      order.acceptedAt = new Date(); // Marquer l’acceptation
+      await order.save();
+      groupedCount++;
+    }
+  }
+  return groupedCount;
 };
 
 // Assigner automatiquement un livreur à toutes les commandes en validated
@@ -142,4 +170,4 @@ const autoAssignDrivers = async () => {
   }
 };
 
-module.exports = { calculateDistance, assignDriver, autoAssignDrivers };
+module.exports = { calculateDistance, assignDriver, autoAssignDrivers, groupOrders };

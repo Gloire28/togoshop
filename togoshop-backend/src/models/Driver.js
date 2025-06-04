@@ -33,7 +33,7 @@ const driverSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['available', 'busy', 'offline'],
+    enum: ['available', 'pending_pickup', 'busy', 'offline'], // Ajout de pending_pickup
     default: 'offline',
   },
   isDiscoverable: {

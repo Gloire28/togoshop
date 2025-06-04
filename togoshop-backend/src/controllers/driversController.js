@@ -1,6 +1,9 @@
 const Driver = require('../models/Driver');
+const Order = require('../models/Order'); // Ajouté pour les requêtes sur Order
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const { sendNotification } = require('../services/notifications'); // Ajouté pour les notifications
+const { groupOrders } = require('../services/optimizer'); // Ajouté pour le groupage
 require('dotenv').config();
 
 // Inscription d'un nouveau livreur
@@ -167,6 +170,7 @@ exports.getDriverLocation = async (req, res) => {
     res.status(500).json({ message: 'Erreur lors de la récupération de la position', error: error.message });
   }
 };
+
 // Accepter une commande
 exports.acceptOrder = async (req, res) => {
   try {
@@ -184,12 +188,15 @@ exports.acceptOrder = async (req, res) => {
     order.status = 'ready_for_pickup';
     order.driverId = driver._id;
     order.zoneId = order._id.toString(); // Première commande définit la zone
+    order.acceptedAt = new Date(); // Marquer l’acceptation
     await order.save();
 
-    driver.status = 'busy';
+    driver.status = 'pending_pickup'; // Permettre le groupage
     await driver.save();
 
-    res.status(200).json({ message: 'Commande acceptée', order });
+    // Regrouper les commandes si possible
+    const groupedCount = await groupOrders(driver._id, orderId);
+    res.status(200).json({ message: `Commande acceptée, ${groupedCount} commande(s) assignée(s)`, order });
   } catch (error) {
     res.status(500).json({ message: 'Erreur lors de l’acceptation', error: error.message });
   }
@@ -212,6 +219,7 @@ exports.rejectOrder = async (req, res) => {
     order.status = 'validated';
     order.priority = 1; // Haute priorité après refus
     order.driverId = null;
+    order.zoneId = '';
     await order.save();
 
     res.status(200).json({ message: 'Commande rejetée', order });
@@ -244,15 +252,54 @@ exports.updateOrderStatus = async (req, res) => {
 
     order.status = status;
     if (status === 'in_delivery') {
-      // Pas de nouvelles commandes possibles
+      driver.status = 'busy'; // Plus de nouvelles commandes possibles
+      await driver.save();
     } else if (status === 'delivered') {
       order.clientValidation = false; // Attendre la validation client
-      await sendNotification(order.clientId, `Votre commande (${orderId}) a été livrée. Veuillez valider.`);
+      await sendNotification(order.clientId, `Votre commande (${orderId}) a été livrée. Veuillez valider avec le code : ${order.validationCode}`);
     }
     await order.save();
+
+    // Vérifier si toutes les commandes du livreur sont livrées et validées
+    if (status === 'delivered') {
+      const remainingOrders = await Order.countDocuments({
+        driverId: driver._id,
+        status: { $in: ['ready_for_pickup', 'in_delivery', 'delivered'] },
+        clientValidation: false,
+      });
+      if (remainingOrders === 0) {
+        driver.status = 'available'; // Toutes les commandes sont validées
+        await driver.save();
+      }
+    }
 
     res.status(200).json({ message: 'Statut mis à jour', order });
   } catch (error) {
     res.status(500).json({ message: 'Erreur lors de la mise à jour du statut', error: error.message });
+  }
+};
+
+// Signaler un problème de validation client
+exports.reportDeliveryIssue = async (req, res) => {
+  try {
+    const { orderId, reason } = req.body;
+    const driver = await Driver.findById(req.user.id);
+    if (!driver) {
+      return res.status(404).json({ message: 'Livreur non trouvé' });
+    }
+
+    let order = await Order.findById(orderId);
+    if (!order || order.driverId.toString() !== driver._id.toString() || order.status !== 'delivered') {
+      return res.status(403).json({ message: 'Accès non autorisé ou commande non prête' });
+    }
+
+    order.status = 'delivery_issue';
+    order.comments = reason || 'Problème signalé par le livreur';
+    await order.save();
+
+    await sendNotification(order.clientId, `Problème signalé pour la commande ${orderId}: ${reason || 'Non spécifié'}`);
+    res.status(200).json({ message: 'Problème signalé', order });
+  } catch (error) {
+    res.status(500).json({ message: 'Erreur lors du signalement', error: error.message });
   }
 };
