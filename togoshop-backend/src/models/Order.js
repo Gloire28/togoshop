@@ -149,8 +149,8 @@ const orderSchema = new mongoose.Schema({
   },
   paymentMethod: {
   type: String,
-  enum: ['cash', 'mobile_money', 'card'],
-  required: true,
+  enum: ['Flooz', 'TMoney', 'cash', 'wallet'],
+  required: false,
   },
   validationCode: { 
     type: String,

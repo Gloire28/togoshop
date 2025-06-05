@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   Alert,
   ActivityIndicator,
+  Animated,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -19,6 +20,7 @@ export default function DriverDashboardScreen() {
   const [isDiscoverable, setIsDiscoverable] = useState(false);
   const [loading, setLoading] = useState(false);
   const navigation = useNavigation();
+  const [scaleValue] = useState(new Animated.Value(1));
 
   useEffect(() => {
     fetchDriverInfo();
@@ -71,6 +73,10 @@ export default function DriverDashboardScreen() {
       const newDiscoverable = response.isDiscoverable ?? response.discoverable ?? !isDiscoverable;
       setIsDiscoverable(newDiscoverable);
       Alert.alert('Succès', `Détectabilité ${newDiscoverable ? 'activée' : 'désactivée'}`);
+      Animated.sequence([
+        Animated.timing(scaleValue, { toValue: 1.1, duration: 100, useNativeDriver: true }),
+        Animated.timing(scaleValue, { toValue: 1, duration: 100, useNativeDriver: true }),
+      ]).start();
     } catch (error) {
       Alert.alert('Erreur', 'Impossible de mettre à jour la détectabilité');
     }
@@ -80,6 +86,14 @@ export default function DriverDashboardScreen() {
     await AsyncStorage.removeItem('token');
     await AsyncStorage.removeItem('user');
     navigation.replace('DriverLogin');
+  };
+
+  const handlePressIn = () => {
+    Animated.spring(scaleValue, { toValue: 0.95, useNativeDriver: true }).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.spring(scaleValue, { toValue: 1, useNativeDriver: true }).start();
   };
 
   return (
@@ -123,41 +137,52 @@ export default function DriverDashboardScreen() {
             </View>
           </View>
           <View style={styles.actions}>
-            <TouchableOpacity
-              style={[styles.actionButton, styles.toggleButton, isDiscoverable ? styles.toggleOffButton : styles.toggleOnButton]}
-              onPress={toggleDiscoverableStatus}
-            >
-              <Icon
-                name={isDiscoverable ? 'eye-off' : 'eye'}
-                size={20}
-                color="#FFFFFF"
-                style={styles.buttonIcon}
-              />
-              <Text style={styles.actionText}>
-                {isDiscoverable ? 'Désactiver Détectabilité' : 'Activer Détectabilité'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => navigation.navigate('DriverOrders')}
-            >
-              <Icon name="truck" size={20} color="#FFFFFF" style={styles.buttonIcon} />
-              <Text style={styles.actionText}>Mes Commandes</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.actionButton}
-              onPress={() => navigation.navigate('DriverEarnings')}
-            >
-              <Icon name="wallet" size={20} color="#FFFFFF" style={styles.buttonIcon} />
-              <Text style={styles.actionText}>Mes Gains</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.actionButton, styles.logoutButton]}
-              onPress={handleLogout}
-            >
-              <Icon name="logout" size={20} color="#FFFFFF" style={styles.buttonIcon} />
-              <Text style={styles.actionText}>Déconnexion</Text>
-            </TouchableOpacity>
+            <Animated.View style={[styles.actionCard, { transform: [{ scale: scaleValue }] }]}>
+              <TouchableOpacity
+                style={[styles.actionButton, isDiscoverable ? styles.toggleOffButton : styles.toggleOnButton]}
+                onPressIn={handlePressIn}
+                onPressOut={handlePressOut}
+                onPress={toggleDiscoverableStatus}
+              >
+                <Icon name={isDiscoverable ? 'eye-off' : 'eye'} size={24} color="#FFFFFF" style={styles.cardIcon} />
+                <Text style={styles.actionText}>
+                  {isDiscoverable ? 'Désactiver Détect.' : 'Activer Détect.'}
+                </Text>
+              </TouchableOpacity>
+            </Animated.View>
+            <Animated.View style={[styles.actionCard, { transform: [{ scale: scaleValue }] }]}>
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPressIn={handlePressIn}
+                onPressOut={handlePressOut}
+                onPress={() => navigation.navigate('DriverOrders')}
+              >
+                <Icon name="truck" size={24} color="#FFFFFF" style={styles.cardIcon} />
+                <Text style={styles.actionText}>Mes Commandes</Text>
+              </TouchableOpacity>
+            </Animated.View>
+            <Animated.View style={[styles.actionCard, { transform: [{ scale: scaleValue }] }]}>
+              <TouchableOpacity
+                style={styles.actionButton}
+                onPressIn={handlePressIn}
+                onPressOut={handlePressOut}
+                onPress={() => navigation.navigate('DriverEarnings')}
+              >
+                <Icon name="wallet" size={24} color="#FFFFFF" style={styles.cardIcon} />
+                <Text style={styles.actionText}>Mes Gains</Text>
+              </TouchableOpacity>
+            </Animated.View>
+            <Animated.View style={[styles.actionCard, { transform: [{ scale: scaleValue }] }]}>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.logoutButton]}
+                onPressIn={handlePressIn}
+                onPressOut={handlePressOut}
+                onPress={handleLogout}
+              >
+                <Icon name="logout" size={24} color="#FFFFFF" style={styles.cardIcon} />
+                <Text style={styles.actionText}>Déconnexion</Text>
+              </TouchableOpacity>
+            </Animated.View>
           </View>
         </>
       )}
@@ -231,22 +256,22 @@ const styles = StyleSheet.create({
   actions: {
     gap: 12,
   },
+  actionCard: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
   actionButton: {
     flexDirection: 'row',
     backgroundColor: '#4B5563',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 10,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 1,
-  },
-  toggleButton: {
-    backgroundColor: '#16A34A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   toggleOnButton: {
     backgroundColor: '#16A34A',
@@ -259,11 +284,12 @@ const styles = StyleSheet.create({
   },
   actionText: {
     color: '#FFFFFF',
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '600',
     fontFamily: 'Poppins-SemiBold',
+    textAlign: 'center',
   },
-  buttonIcon: {
-    marginRight: 8,
+  cardIcon: {
+    marginRight: 12,
   },
 });

@@ -38,6 +38,7 @@ export const apiRequest = async (endpoint, options = {}) => {
     }
 
     const data = text ? JSON.parse(text) : {};
+    console.log('Données parsées de l\'API:', data);
     return data;
   } catch (error) {
     throw error;

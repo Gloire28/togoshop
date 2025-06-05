@@ -276,6 +276,7 @@ exports.getOrderById = async (req, res) => {
     const { id } = req.params;
 
     const order = await Order.findById(id)
+      .select('paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId subtotal serviceFee totalAmount') // Ajout des champs manquants
       .populate('products.productId')
       .populate('supermarketId');
 
@@ -287,6 +288,8 @@ exports.getOrderById = async (req, res) => {
       return res.status(403).json({ message: 'Accès non autorisé' });
     }
 
+    console.log('Order renvoyé par getOrderById:', order);
+
     let zoneOrders = [];
     if (order.zoneId && order.status === 'ready_for_pickup' && req.user.role === 'driver') {
       zoneOrders = await Order.find({
@@ -294,6 +297,7 @@ exports.getOrderById = async (req, res) => {
         status: 'ready_for_pickup',
         deliveryType: { $ne: 'evening' },
       })
+        .select('paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId subtotal serviceFee totalAmount') // Ajout des champs ici aussi
         .populate('products.productId')
         .populate('supermarketId');
     }
@@ -333,7 +337,7 @@ exports.getMyOrders = async (req, res) => {
     console.log(`Récupération de toutes les commandes pour utilisateur ${userId}`);
 
     const orders = await Order.find({ clientId: userId })
-      .select('paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId') // Projection explicite
+      .select('status paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId managerId totalAmount createdAt') // Projection explicite
       .populate('products.productId')
       .populate('supermarketId')
       .populate('driverId')
@@ -349,42 +353,6 @@ exports.getMyOrders = async (req, res) => {
   } catch (error) {
     console.error('Erreur lors de la récupération des commandes:', error.message);
     res.status(500).json({ message: 'Erreur lors de la récupération des commandes', error: error.message });
-  }
-};
-
-// Récupérer toutes les commandes de l'utilisateur connecté
-exports.getOrderById = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const order = await Order.findById(id)
-      .select('paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId') // Projection explicite
-      .populate('products.productId')
-      .populate('supermarketId');
-
-    if (!order) {
-      return res.status(404).json({ message: 'Commande non trouvée' });
-    }
-
-    if (req.user.role !== 'admin' && order.clientId.toString() !== req.user.id) {
-      return res.status(403).json({ message: 'Accès non autorisé' });
-    }
-
-    let zoneOrders = [];
-    if (order.zoneId && order.status === 'ready_for_pickup' && req.user.role === 'driver') {
-      zoneOrders = await Order.find({
-        zoneId: order.zoneId,
-        status: 'ready_for_pickup',
-        deliveryType: { $ne: 'evening' },
-      })
-        .select('paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId') // Projection pour zoneOrders
-        .populate('products.productId')
-        .populate('supermarketId');
-    }
-
-    res.status(200).json({ order, zoneOrders });
-  } catch (error) {
-    res.status(500).json({ message: 'Erreur lors de la récupération de la commande', error: error.message });
   }
 };
 
@@ -919,7 +887,7 @@ exports.getDriverOrders = async (req, res) => {
     console.log('Statuts utilisés pour le filtre:', statuses);
 
     const orders = await Order.find({ driverId, status: { $in: statuses } })
-      .select('paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId') // Ajout de la projection explicite
+      .select('status paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId') // Ajout de la projection explicite
       .populate('products.productId')
       .populate('supermarketId')
       .populate('clientId') // Infos du client déjà inclus

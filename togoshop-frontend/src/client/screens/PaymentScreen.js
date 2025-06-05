@@ -62,6 +62,7 @@ export default function PaymentScreen({ route, navigation }) {
           throw new Error('Commande non trouvée dans la réponse');
         }
         setOrder(orderResponse.order);
+        console.log('Order chargé après setOrder:', orderResponse.order);
 
         const supermarketId = orderResponse.order?.supermarketId?._id;
         const locationId = orderResponse.order?.locationId;
@@ -88,10 +89,20 @@ export default function PaymentScreen({ route, navigation }) {
     if (orderId) fetchOrderAndSupermarket();
   }, [orderId]);
 
-  const subtotal = order?.subtotal || (order?.products?.reduce((sum, item) => sum + (item.productId?.price || 0) * item.quantity, 0) || 0);
+  // Calcul des valeurs avec débogage du reduce
+  const subtotal = order?.subtotal ?? (
+    order?.products?.reduce((sum, item) => {
+      const price = item.productId?.price || 0;
+      const quantity = item.quantity || 0;
+      console.log(`Calcul reduce - item:`, item, `price: ${price}, quantity: ${quantity}, sous-total partiel: ${sum + price * quantity}`);
+      return sum + price * quantity;
+    }, 0) || 0
+  );
   const deliveryFee = order?.deliveryFee || 0;
   const serviceFee = order?.serviceFee || 0;
   const totalAmount = order?.totalAmount || (subtotal + deliveryFee + serviceFee);
+
+  console.log('Order au moment du calcul:', order);
   console.log(`Valeurs calculées - Sous-total: ${subtotal}, Frais de livraison: ${deliveryFee}, Frais de service: ${serviceFee}, Total: ${totalAmount}`);
 
   const handlePayment = async () => {
