@@ -12,6 +12,7 @@ const { calculateDistance } = require('../services/geolocationBackend');
 const loyaltyController = require('./loyaltyController');
 const { validateStock, checkAndAssignDynamicOrders } = require('../services/orderUtils');
 const { createPayment } = require('./paymentsController');
+const { roundToTwoDecimals } = require('../services/numberUtils');
 
 // Ajouter un produit au panier
 exports.addToCart = async (req, res) => {
@@ -78,10 +79,10 @@ exports.addToCart = async (req, res) => {
       }
     });
 
-    order.totalAmount = order.products.reduce((total, item) => {
+    order.totalAmount = roundToTwoDecimals(order.products.reduce((total, item) => {
       const product = productData.find(p => p._id.toString() === item.productId.toString());
       return total + (item.quantity * (product?.price || 0));
-    }, 0);
+    }, 0));
 
     await order.save();
     await order.populate('products.productId');
@@ -153,8 +154,8 @@ exports.createOrder = async (req, res) => {
         },
         partialOrder: {
           products: updatedProducts,
-          totalAmount,
-          deliveryFee,
+          totalAmount: roundToTwoDecimals(totalAmount),
+          deliveryFee: roundToTwoDecimals(deliveryFee),
         },
       });
     }
@@ -185,9 +186,9 @@ exports.createOrder = async (req, res) => {
       supermarketId,
       locationId,
       products: updatedProducts,
-      totalAmount,
-      deliveryFee,
-      additionalFees,
+      totalAmount: roundToTwoDecimals(totalAmount),
+      deliveryFee: roundToTwoDecimals(deliveryFee),
+      additionalFees: roundToTwoDecimals(additionalFees),
       deliveryAddress: updatedDeliveryAddress,
       scheduledDeliveryTime: scheduledDeliveryTime || null,
       deliveryType: deliveryType || 'standard',
@@ -400,8 +401,8 @@ exports.updateOrder = async (req, res) => {
         },
         partialOrder: {
           products: updatedProducts,
-          subtotal,
-          deliveryFee,
+          subtotal: roundToTwoDecimals(subtotal),
+          deliveryFee: roundToTwoDecimals(deliveryFee),
         },
       });
     }
@@ -416,11 +417,12 @@ exports.updateOrder = async (req, res) => {
     }
 
     order.products = updatedProducts;
-    order.subtotal = subtotal; // Stocker le sous-total
-    order.deliveryFee = deliveryFee;
-    order.additionalFees = additionalFees;
-    order.serviceFee = serviceFee; // Stocker les frais de service
-    order.totalAmount = totalAmount; // Stocker le montant total
+    order.subtotal = roundToTwoDecimals(subtotal);
+    order.deliveryFee = roundToTwoDecimals(deliveryFee);
+    order.deliveryFee = roundToTwoDecimals(deliveryFee);
+    order.serviceFee = roundToTwoDecimals(serviceFee);
+    order.totalAmount = roundToTwoDecimals(totalAmount);
+    order.serviceFee = roundToTwoDecimals(serviceFee);
     await order.save();
 
     order = await Order.findById(id).populate('products.productId');
@@ -428,10 +430,10 @@ exports.updateOrder = async (req, res) => {
       success: true,
       order: {
         ...order.toObject(),
-        subtotal: order.subtotal,
-        deliveryFee: order.deliveryFee,
-        serviceFee: order.serviceFee,
-        totalAmount: order.totalAmount,
+        subtotal: roundToTwoDecimals(order.subtotal),
+        deliveryFee: roundToTwoDecimals(order.deliveryFee),
+        serviceFee: roundToTwoDecimals(order.serviceFee),
+        totalAmount: roundToTwoDecimals(order.totalAmount),
       },
       nextStep: 'payment',
     });
@@ -567,7 +569,7 @@ exports.updateOrderStatus = async (req, res) => {
         const driver = await Driver.findOne({ _id: new mongoose.Types.ObjectId(order.driverId) });
         if (driver) {
           driver.status = 'available';
-          driver.earnings = (driver.earnings || 0) + order.deliveryFee;
+          driver.earnings = roundToTwoDecimals((driver.earnings || 0) + order.deliveryFee);
           await driver.save();
           console.log(`Livreur mis à jour: ${driver._id}, status: ${driver.status}, earnings: ${driver.earnings}`);
         } else {
@@ -706,10 +708,10 @@ exports.submitOrder = async (req, res) => {
     const serviceFee = Math.round(subtotal * 0.10);
     const totalAmount = subtotal + deliveryFee + (order.additionalFees || 0) + serviceFee;
 
-    order.subtotal = subtotal;
-    order.deliveryFee = deliveryFee;
-    order.serviceFee = serviceFee;
-    order.totalAmount = totalAmount;
+    order.subtotal = roundToTwoDecimals(subtotal);
+    order.deliveryFee = roundToTwoDecimals(deliveryFee);
+    order.serviceFee = roundToTwoDecimals(serviceFee);
+    order.totalAmount = roundToTwoDecimals(totalAmount);
     order.deliveryType = deliveryType;
     order.paymentMethod = paymentMethod; 
     await order.save(); 
@@ -761,10 +763,10 @@ exports.submitOrder = async (req, res) => {
       orderNumber,
       order: {
         ...order.toObject(),
-        subtotal,
-        deliveryFee,
-        serviceFee,
-        totalAmount,
+        subtotal: roundToTwoDecimals(subtotal),
+        deliveryFee: roundToTwoDecimals(deliveryFee),
+        serviceFee: roundToTwoDecimals(serviceFee),
+        totalAmount: roundToTwoDecimals(totalAmount),
       },
       paymentStatus,
     });
@@ -887,11 +889,17 @@ exports.getDriverOrders = async (req, res) => {
     console.log('Statuts utilisés pour le filtre:', statuses);
 
     const orders = await Order.find({ driverId, status: { $in: statuses } })
-      .select('status paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId') // Ajout de la projection explicite
+      .select('status paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId driverId updatedAt') 
       .populate('products.productId')
       .populate('supermarketId')
-      .populate('clientId') // Infos du client déjà inclus
+      .populate('clientId') 
       .sort('updatedAt');
+
+    // Arrondir deliveryFee pour chaque commande
+    const roundedOrders = orders.map(order => {
+      order.deliveryFee = roundToTwoDecimals(order.deliveryFee);
+      return order;
+    });
 
     console.log('Commandes trouvées:', orders.length ? orders : 'Aucune commande trouvée');
     res.status(200).json(orders);

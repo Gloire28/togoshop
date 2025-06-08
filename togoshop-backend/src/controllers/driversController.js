@@ -4,7 +4,13 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { sendNotification } = require('../services/notifications'); // Ajouté pour les notifications
 const { groupOrders } = require('../services/optimizer'); // Ajouté pour le groupage
+const { GroupOrders } = require('../services/optimizer');
+const loyaltyController = require('./loyaltyController');
+const { roundToTwoDecimals } = require('../services/numberUtils');
+const mongoose = require('mongoose'); 
 require('dotenv').config();
+
+
 
 // Inscription d'un nouveau livreur
 exports.registerDriver = async (req, res) => {
@@ -92,6 +98,7 @@ exports.getDriver = async (req, res) => {
     if (!driver) {
       return res.status(404).json({ message: 'Livreur non trouvé' });
     }
+    driver.earnings = roundToTwoDecimals(driver.earnings);
     res.status(200).json(driver);
   } catch (error) {
     res.status(500).json({ message: 'Erreur lors de la récupération des informations', error: error.message });
@@ -257,6 +264,42 @@ exports.updateOrderStatus = async (req, res) => {
     } else if (status === 'delivered') {
       order.clientValidation = false; // Attendre la validation client
       await sendNotification(order.clientId, `Votre commande (${orderId}) a été livrée. Veuillez valider avec le code : ${order.validationCode}`);
+
+      // Ajout des points de fidélité pour le client
+      const points = Math.floor(order.totalAmount / 2000);
+      console.log(`Ajout de ${points} points de fidélité pour la commande ${orderId} avec montant ${order.totalAmount}`);
+      try {
+        await loyaltyController.addPoints(
+          {
+            user: { id: order.clientId.toString(), role: 'client' },
+            body: {
+              points: points,
+              description: `Commande livrée (ID: ${order._id})`,
+              fromOrder: true,
+            },
+          },
+          {
+            status: (code) => ({ json: (data) => console.log('Réponse ajout points:', data) }),
+            json: (data) => console.log('Réponse ajout points:', data),
+          }
+        );
+        console.log(`Points ajoutés avec succès pour l'utilisateur ${order.clientId}`);
+      } catch (error) {
+        console.error('Erreur lors de l’ajout des points:', error.message);
+      }
+
+      // Mise à jour des earnings du livreur
+      if (order.driverId) {
+        const driver = await Driver.findOne({ _id: new mongoose.Types.ObjectId(order.driverId) });
+        if (driver) {
+          driver.status = 'available';
+          driver.earnings = roundToTwoDecimals((driver.earnings || 0) + order.deliveryFee);
+          await driver.save();
+          console.log(`Livreur mis à jour: ${driver._id}, status: ${driver.status}, earnings: ${driver.earnings}`);
+        } else {
+          console.log(`Livreur non trouvé pour driverId: ${order.driverId}`);
+        }
+      }
     }
     await order.save();
 

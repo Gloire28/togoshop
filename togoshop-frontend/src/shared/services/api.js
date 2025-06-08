@@ -126,7 +126,9 @@ export const getDriverInfo = () => apiRequest('/drivers/me', { method: 'GET' });
 export const updateDriverLocation = (lat, lng) => apiRequest('/drivers/location', { method: 'PUT', body: { lat, lng } });
 
 // Récupérer les commandes assignées au livreur, incluant les statuts pertinents
-export const getDriverOrders = () => apiRequest('/orders/driver/me?statuses=validated,ready_for_pickup,in_delivery', { method: 'GET' });
+export const getDriverOrders = () => apiRequest('/orders/driver/me?statuses=validated,ready_for_pickup,in_delivery,delivered', { method: 'GET' });
+
+
 
 // Activer/Désactiver la détectabilité du livreur
 export const toggleDriverDiscoverable = () => apiRequest('/drivers/discoverable', { method: 'PUT' });

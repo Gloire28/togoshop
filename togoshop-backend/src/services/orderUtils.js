@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Product = require('../models/Product');
 const Supermarket = require('../models/Supermarket');
 const { calculateDistance } = require('./geolocationBackend');
+const { roundToTwoDecimals } = require('./numberUtils');
 
 // Valider le stock des produits et calculer tous les frais
 const validateStock = async (products, supermarketId, locationId, deliveryType, deliveryAddress) => {
@@ -55,7 +56,7 @@ const validateStock = async (products, supermarketId, locationId, deliveryType, 
         return {
           locationId: loc.locationId,
           stock: loc.stock,
-          additionalFee: Math.round(200 + 50 * distance),
+          additionalFee: roundToTwoDecimals(200 + 50 * distance),
         };
       });
 
@@ -94,15 +95,15 @@ const validateStock = async (products, supermarketId, locationId, deliveryType, 
   // Calcul du montant total final
   const totalAmount = subtotal + deliveryFee + additionalFees + serviceFee;
 
-  return { 
-    stockIssues, 
-    updatedProducts, 
-    subtotal, 
-    totalWeight, 
-    deliveryFee, 
-    additionalFees, 
-    serviceFee, 
-    totalAmount 
+  return {
+    stockIssues,
+    updatedProducts,
+    subtotal: roundToTwoDecimals(subtotal),
+    totalWeight,
+    deliveryFee: roundToTwoDecimals(deliveryFee),
+    additionalFees: roundToTwoDecimals(additionalFees),
+    serviceFee: roundToTwoDecimals(serviceFee),
+    totalAmount: roundToTwoDecimals(totalAmount),
   };
 };
 

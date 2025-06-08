@@ -33,7 +33,9 @@ export default function DriverOrderScreen() {
     try {
       const response = await getDriverOrders();
       console.log('Données reçues par fetchOrders:', response);
-      setOrders(response || []);
+      // Filtrer pour exclure les commandes livrées
+      const filteredOrders = (response || []).filter(order => order.status !== 'delivered');
+      setOrders(filteredOrders);
     } catch (error) {
       Alert.alert('Erreur', 'Impossible de charger les commandes');
     } finally {
@@ -101,9 +103,9 @@ export default function DriverOrderScreen() {
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos(lat1 * (Math.PI / 180)) *
-        Math.cos(lat2 * (Math.PI / 180)) *
-        Math.sin(dLng / 2) *
-        Math.sin(dLng / 2);
+      Math.cos(lat2 * (Math.PI / 180)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     const distance = R * c; // Distance en km
     return distance.toFixed(2); // Arrondi à 2 décimales
