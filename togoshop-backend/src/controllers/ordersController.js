@@ -277,9 +277,11 @@ exports.getOrderById = async (req, res) => {
     const { id } = req.params;
 
     const order = await Order.findById(id)
-      .select('paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId subtotal serviceFee totalAmount') // Ajout des champs manquants
+      .select('status paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId subtotal serviceFee totalAmount queuePosition')
+      .populate('driverId', 'name phoneNumber') 
       .populate('products.productId')
       .populate('supermarketId');
+      
 
     if (!order) {
       return res.status(404).json({ message: 'Commande non trouvée' });
@@ -302,8 +304,20 @@ exports.getOrderById = async (req, res) => {
         .populate('products.productId')
         .populate('supermarketId');
     }
+    let estimatedTime = 0;
+    if (order.status === 'ready_for_pickup' || order.status === 'in_delivery') {
+      const supermarket = await Supermarket.findById(order.supermarketId).lean();
+      const location = supermarket.locations.find(loc => loc._id.toString() === order.locationId);
+      if (location && order.deliveryAddress && order.deliveryAddress.lat && order.deliveryAddress.lng) {
+        const distance = calculateDistance(
+          { lat: location.latitude, lng: location.longitude },
+          { lat: order.deliveryAddress.lat, lng: order.deliveryAddress.lng }
+        );
+        estimatedTime = Math.round((distance / 20) * 60); // Vitesse moyenne 20 km/h en minutes
+      }
+    } 
 
-    res.status(200).json({ order, zoneOrders });
+    res.status(200).json({ order, zoneOrders, queuePosition: order.queuePosition, estimatedTime });
   } catch (error) {
     res.status(500).json({ message: 'Erreur lors de la récupération de la commande', error: error.message });
   }
@@ -584,6 +598,18 @@ exports.updateOrderStatus = async (req, res) => {
     order.updatedAt = Date.now();
     await order.save();
     console.log(`Commande sauvegardée après mise à jour:`, order);
+
+    if (status === 'ready_for_pickup' && !order.driverId) {
+      const { assignDriver } = require('../services/optimizer');
+      try {
+        const driverId = await assignDriver(order._id);
+        order.driverId = driverId;
+        console.log(`Livreur assigné: ${driverId}`);
+      } catch (error) {
+        console.error('Erreur lors de l’assignation du livreur:', error.message);
+        return res.status(500).json({ message: error.message });
+      }
+    }
 
     if (status === 'ready_for_pickup') {
       await checkAndAssignDynamicOrders(id);

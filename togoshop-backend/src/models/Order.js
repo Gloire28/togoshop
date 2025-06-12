@@ -170,9 +170,25 @@ const orderSchema = new mongoose.Schema({
   },
 });
 
-orderSchema.pre('save', function(next) {
+orderSchema.pre('save', async function(next) {
   this.updatedAt = Date.now();
+
+
+  // Mettre à jour queuePosition si le statut est pending_validation ou awaiting_validator
+  if (['pending_validation', 'awaiting_validator'].includes(this.status)) {
+    const Order = mongoose.model('Order');
+    const pendingOrders = await Order.countDocuments({
+      supermarketId: this.supermarketId,
+      locationId: this.locationId,
+      status: { $in: ['pending_validation', 'awaiting_validator'] },
+      _id: { $ne: this._id }, // Exclure la commande actuelle
+    });
+    this.queuePosition = pendingOrders + 1;
+  }
+
   next();
 });
+
+orderSchema.index({ supermarketId: 1, locationId: 1, status: 1 });
 
 module.exports = mongoose.model('Order', orderSchema);

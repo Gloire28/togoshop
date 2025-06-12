@@ -54,6 +54,14 @@ export default function PaymentScreen({ route, navigation }) {
   const [clientPhone, setClientPhone] = useState(''); // Ajout pour Flooz/TMoney
 
   useEffect(() => {
+    if (!orderId) {
+      Alert.alert('Erreur', 'Aucun ID de commande trouvé. Redirection...', [
+        { text: 'OK', onPress: () => navigation.navigate('Home') }
+      ]);
+    }
+  }, [orderId]);
+
+  useEffect(() => {
     const fetchOrderAndSupermarket = async () => {
       try {
         const orderResponse = await apiRequest(`/orders/${orderId}`);
@@ -133,7 +141,7 @@ export default function PaymentScreen({ route, navigation }) {
       Alert.alert(
         'Commande Soumise',
         `Numéro de commande : ${orderNumber}\nMéthode : ${paymentMethod}\nLivraison : ${deliveryType}\nTotal : ${response.order.totalAmount} FCFA\nStatut : ${response.order.status}`,
-        [{ text: 'OK', onPress: () => navigation.navigate('Tracking') }]
+        [{ text: 'OK', onPress: () => navigation.navigate('Tracking', { orderId }) }]
       );
     } catch (error) {
       console.log('Erreur lors de la soumission de la commande:', error.message);
