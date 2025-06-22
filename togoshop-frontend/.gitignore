@@ -7,3 +7,4 @@ cert.pem
 key.pem
 web/
 togoshop-mobile/
+node_modules/
