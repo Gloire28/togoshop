@@ -39,7 +39,7 @@ const managerSchema = new mongoose.Schema({
       message: 'Un manager doit avoir exactement les rôles "order_validator" et "stock_manager".'
     }
   },
-  isAvailable: { // Nouveau champ
+  isAvailable: { 
     type: Boolean,
     default: true,
   },

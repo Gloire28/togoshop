@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-
 const promotionSchema = new mongoose.Schema({
   supermarketId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -34,7 +33,6 @@ const promotionSchema = new mongoose.Schema({
   discountValue: {
     type: Number,
     required: true,
-    
   },
   minOrderAmount: {
     type: Number,
@@ -51,7 +49,7 @@ const promotionSchema = new mongoose.Schema({
   },
   maxUses: {
     type: Number,
-    default: Number.MAX_SAFE_INTEGER, 
+    default: Number.MAX_SAFE_INTEGER,
     min: 1,
   },
   currentUses: {
@@ -62,6 +60,15 @@ const promotionSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true,
+  },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Manager',
+    required: true,
+  },
+  promotedPrice: {
+  type: Number,
+  default: null,
   },
   createdAt: {
     type: Date,

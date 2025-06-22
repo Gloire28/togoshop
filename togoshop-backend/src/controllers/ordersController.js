@@ -5,6 +5,7 @@ const Payment = require('../models/Payment');
 const Supermarket = require('../models/Supermarket');
 const Driver = require('../models/Driver');
 const Loyalty = require('../models/loyalty');
+const Promotion = require('../models/Promotion');
 const { assignManager } = require('../services/managerOptimizer');
 const { assignDriver } = require('../services/optimizer');
 const { sendNotification } = require('../services/notifications');
@@ -41,7 +42,7 @@ exports.addToCart = async (req, res) => {
     if (!location) return res.status(400).json({ error: `Emplacement ${locationId} invalide` });
 
     const productIds = products.map(p => p.productId);
-    const productData = await Product.find({ _id: { $in: productIds } });
+    const productData = await Product.find({ _id: { $in: productIds } }).lean();
     if (productData.length !== productIds.length) return res.status(400).json({ error: 'Produits introuvables' });
 
     for (const product of productData) {
@@ -66,22 +67,38 @@ exports.addToCart = async (req, res) => {
       return res.status(400).json({ error: 'Même supermarché/emplacement requis' });
     }
 
+    const now = new Date();
+    const activePromotions = await Promotion.find({
+      productId: { $in: productIds },
+      isActive: true,
+      startDate: { $lte: now },
+      endDate: { $gte: now },
+      $expr: { $lt: ['$currentUses', '$maxUses'] },
+    }).lean();
+
     products.forEach(newProduct => {
+      const product = productData.find(p => p._id.toString() === newProduct.productId);
+      const promo = activePromotions.find(p => p.productId.toString() === newProduct.productId);
       const existingProduct = order.products.find(p => p.productId.toString() === newProduct.productId);
+      const itemPrice = promo && promo.promotedPrice !== null ? promo.promotedPrice : product.price;
+
       if (existingProduct) {
         existingProduct.quantity += newProduct.quantity || 1;
+        existingProduct.promotedPrice = promo && promo.promotedPrice !== null ? promo.promotedPrice : null;
       } else {
         order.products.push({
           productId: newProduct.productId,
           quantity: newProduct.quantity || 1,
           locationId: newProduct.locationId,
+          promotedPrice: promo && promo.promotedPrice !== null ? promo.promotedPrice : null,
         });
       }
     });
 
     order.totalAmount = roundToTwoDecimals(order.products.reduce((total, item) => {
       const product = productData.find(p => p._id.toString() === item.productId.toString());
-      return total + (item.quantity * (product?.price || 0));
+      const price = item.promotedPrice || product?.price || 0;
+      return total + (item.quantity * price);
     }, 0));
 
     await order.save();
@@ -231,6 +248,7 @@ exports.getPendingOrders = async (req, res) => {
 exports.getUserCart = async (req, res) => {
   try {
     const userId = req.user.id;
+    console.log(`Récupération du panier pour l'utilisateur: ${userId}`);
 
     let order = await Order.findOne({
       clientId: userId,
@@ -248,23 +266,83 @@ exports.getUserCart = async (req, res) => {
       .lean();
 
     if (!order) {
-      return res.status(200).json({ message: 'Aucune commande dans le panier', order: null });
+      console.log(`Aucune commande trouvée pour l'utilisateur: ${userId}`);
+      return res.status(200).json({
+        message: 'Aucune commande dans le panier',
+        order: null,
+        products: [],
+        orderId: null,
+      });
     }
 
-    const calculatedTotal = order.products.reduce((total, item) => {
-      const productPrice = item.productId?.price || 0;
+    console.log(`Commande trouvée: ${order._id}, produits: ${order.products.length}`);
+
+    // Vérifier les promotions actives
+    const now = new Date();
+    const promotions = await Promotion.find({
+      productId: { $in: order.products.map(p => p.productId._id) },
+      isActive: true,
+      startDate: { $lte: now },
+      endDate: { $gte: now },
+      $expr: { $lt: ['$currentUses', '$maxUses'] },
+    }).populate('productId');
+
+    // Initialiser promotedPrice à null pour tous les produits
+    order.products = order.products.map(product => ({
+      ...product,
+      promotedPrice: null, // Par défaut, pas de promotion
+    }));
+
+    // Appliquer les prix promus
+    order.products.forEach(product => {
+      const promo = promotions.find(p => p.productId._id.toString() === product.productId._id.toString());
+      if (promo && typeof promo.promotedPrice === 'number' && promo.promotedPrice < product.productId.price) {
+        product.promotedPrice = promo.promotedPrice;
+        console.log(`Promotion appliquée pour le produit ${product.productId.name}: ${promo.promotedPrice} FCFA`);
+      }
+    });
+
+    // Normaliser la structure des produits
+    order.products = order.products.map(product => ({
+      productId: product.productId._id,
+      name: product.productId.name || 'Produit inconnu',
+      price: Number(product.productId.price) || 0,
+      quantity: Number(product.quantity) || 1,
+      comment: product.comment || '',
+      alternativeLocationId: product.alternativeLocationId || '',
+      stockByLocation: product.productId.stockByLocation || [],
+      weight: Number(product.productId.weight) || 0,
+      promotedPrice: product.promotedPrice !== null ? Number(product.promotedPrice) : null,
+    }));
+
+    // Recalculer le sous-total et le total
+    const calculatedSubtotal = order.products.reduce((total, item) => {
+      const productPrice = item.promotedPrice !== null ? item.promotedPrice : item.price;
       return total + item.quantity * productPrice;
     }, 0);
 
-    if (order.totalAmount !== calculatedTotal) {
+    const calculatedTotal = calculatedSubtotal + (order.deliveryFee || 0) + (order.serviceFee || 0) + (order.additionalFees || 0);
+
+    console.log(`Sous-total calculé: ${calculatedSubtotal}, Total calculé: ${calculatedTotal}`);
+
+    if (order.subtotal !== calculatedSubtotal || order.totalAmount !== calculatedTotal) {
+      console.log(`Mise à jour: subtotal: ${order.subtotal} -> ${calculatedSubtotal}, total: ${order.totalAmount} -> ${calculatedTotal}`);
+      order.subtotal = calculatedSubtotal;
       order.totalAmount = calculatedTotal;
       await Order.updateOne(
         { _id: order._id },
-        { $set: { totalAmount: calculatedTotal, updatedAt: new Date() } }
+        { $set: { subtotal: calculatedSubtotal, totalAmount: calculatedTotal, products: order.products, updatedAt: new Date() } }
       );
     }
 
-    res.status(200).json(order);
+    // Ajouter orderId à la réponse
+    order.orderId = order._id;
+
+    res.status(200).json({
+      ...order,
+      products: order.products,
+      orderId: order._id,
+    });
   } catch (error) {
     console.error('Erreur lors de la récupération du panier:', error.message);
     res.status(500).json({ message: 'Erreur serveur lors de la récupération du panier', error: error.message });
@@ -277,7 +355,7 @@ exports.getOrderById = async (req, res) => {
     const { id } = req.params;
 
     const order = await Order.findById(id)
-      .select('status paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId subtotal serviceFee totalAmount queuePosition')
+      .select('status paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId subtotal serviceFee totalAmount queuePosition validationCode')
       .populate('driverId', 'name phoneNumber') 
       .populate('products.productId')
       .populate('supermarketId');
@@ -395,6 +473,13 @@ exports.updateOrder = async (req, res) => {
       return res.status(400).json({ message: 'Liste de produits requise' });
     }
 
+    // Récupérer les données des produits
+    const productIds = products.map(p => p.productId);
+    const productData = await Product.find({ _id: { $in: productIds } }).lean();
+    if (productData.length !== productIds.length) {
+      return res.status(400).json({ message: 'Certains produits n’ont pas été trouvés' });
+    }
+
     const { stockIssues, updatedProducts, subtotal, totalWeight, deliveryFee, additionalFees, serviceFee, totalAmount } = await validateStock(
       products,
       order.supermarketId.toString(),
@@ -430,13 +515,38 @@ exports.updateOrder = async (req, res) => {
       };
     }
 
+    // Vérifier les promotions actives
+    const now = new Date();
+    const promotions = await Promotion.find({
+      productId: { $in: updatedProducts.map(p => p.productId) },
+      isActive: true,
+      startDate: { $lte: now },
+      endDate: { $gte: now },
+      $expr: { $lt: ['$currentUses', '$maxUses'] },
+    }).populate('productId');
+
+    // Appliquer les prix promus
+    updatedProducts.forEach(product => {
+      const promo = promotions.find(p => p.productId._id.toString() === product.productId.toString());
+      if (promo && promo.promotedPrice !== null) {
+        product.promotedPrice = promo.promotedPrice;
+      } else {
+        delete product.promotedPrice;
+      }
+    });
+
+    // Recalculer les totaux avec les prix promus
+    const calculatedSubtotal = updatedProducts.reduce((sum, item) => {
+      const product = productData.find(p => p._id.toString() === item.productId.toString()) || {};
+      const price = item.promotedPrice || product.price || 0;
+      return sum + price * item.quantity;
+    }, 0);
+
     order.products = updatedProducts;
-    order.subtotal = roundToTwoDecimals(subtotal);
-    order.deliveryFee = roundToTwoDecimals(deliveryFee);
+    order.subtotal = roundToTwoDecimals(calculatedSubtotal);
     order.deliveryFee = roundToTwoDecimals(deliveryFee);
     order.serviceFee = roundToTwoDecimals(serviceFee);
-    order.totalAmount = roundToTwoDecimals(totalAmount);
-    order.serviceFee = roundToTwoDecimals(serviceFee);
+    order.totalAmount = roundToTwoDecimals(calculatedSubtotal + deliveryFee + serviceFee + (additionalFees || 0));
     await order.save();
 
     order = await Order.findById(id).populate('products.productId');
@@ -729,8 +839,11 @@ exports.submitOrder = async (req, res) => {
       deliveryFee += distanceFee + weightFee;
     }
 
-    // Recalculer subtotal, serviceFee, et totalAmount
-    const subtotal = order.subtotal || order.products.reduce((sum, item) => sum + (item.productId?.price || 0) * item.quantity, 0);
+    // Recalculer subtotal, serviceFee, et totalAmount en tenant compte de promotedPrice
+    const subtotal = order.subtotal || order.products.reduce((sum, item) => {
+      const price = item.promotedPrice || item.productId?.price || 0;
+      return sum + price * item.quantity;
+    }, 0);
     const serviceFee = Math.round(subtotal * 0.10);
     const totalAmount = subtotal + deliveryFee + (order.additionalFees || 0) + serviceFee;
 
@@ -932,5 +1045,102 @@ exports.getDriverOrders = async (req, res) => {
   } catch (error) {
     console.error('Erreur dans getDriverOrders:', error.message);
     res.status(500).json({ message: 'Erreur lors de la récupération des commandes', error: error.message });
+  }
+};
+// validation de la commande par le livreur
+exports.validateDeliveryByDriver = async (req, res) => {
+  console.log(`validateDeliveryByDriver appelé avec req.params:`, req.params);
+  try {
+    const { id } = req.params; // Changement de orderId à id
+    const { validationCode } = req.body;
+    const driverId = req.user.id;
+
+    if (!id) {
+      console.log('Erreur : id de commande manquant dans req.params');
+      return res.status(400).json({ success: false, message: 'ID de commande manquant.' });
+    }
+
+    if (!validationCode) {
+      console.log('Code de validation manquant dans la requête');
+      return res.status(400).json({ success: false, message: 'Code de validation requis.' });
+    }
+
+    const order = await Order.findById(id).populate('products.productId');
+    console.log(`Recherche de la commande avec _id: ${id}`);
+    if (!order) {
+      console.log(`Commande non trouvée pour _id: ${id}`);
+      return res.status(404).json({ success: false, message: 'Commande non trouvée.' });
+    }
+
+    if (order.driverId.toString() !== driverId) {
+      console.log(`Livreur ${driverId} non autorisé pour la commande ${id}`);
+      return res.status(403).json({ success: false, message: 'Non autorisé à valider cette commande.' });
+    }
+
+    if (order.status !== 'in_delivery' && order.status !== 'ready_for_pickup') {
+      console.log(`Commande ${id} n’est pas dans un statut valide pour validation: ${order.status}`);
+      return res.status(400).json({ success: false, message: 'La commande n’est pas prête pour la validation.' });
+    }
+
+    if (order.validationCode !== validationCode.toUpperCase()) {
+      console.log(`Code de validation incorrect pour la commande ${id}`);
+      return res.status(400).json({ success: false, message: 'Code de validation incorrect.' });
+    }
+
+    // Mettre à jour le statut de la commande
+    order.status = 'delivered';
+    order.clientValidation = true;
+    order.updatedAt = new Date();
+
+    // Ajouter des points de fidélité
+    const points = Math.floor(order.totalAmount / 2000);
+    console.log(`Ajout de ${points} points de fidélité pour la commande ${id}`);
+    try {
+      await loyaltyController.addPoints(
+        {
+          user: { id: order.clientId.toString(), role: 'client' },
+          body: {
+            points: points,
+            description: `Commande livrée (ID: ${order._id})`,
+            fromOrder: true,
+          },
+        },
+        {
+          status: (code) => ({ json: (data) => console.log('Réponse ajout points:', data) }),
+          json: (data) => console.log('Réponse ajout points:', data),
+        }
+      );
+      console.log(`Points ajoutés pour l'utilisateur ${order.clientId}`);
+    } catch (error) {
+      console.error('Erreur lors de l’ajout des points:', error.message);
+    }
+
+    // Mettre à jour le livreur
+    const driver = await Driver.findById(driverId);
+    if (driver) {
+      driver.earnings = roundToTwoDecimals((driver.earnings || 0) + order.deliveryFee);
+      const remainingOrders = await Order.countDocuments({
+        driverId: driverId,
+        status: { $in: ['ready_for_pickup', 'in_delivery', 'delivered'] },
+        clientValidation: false,
+      });
+      if (remainingOrders === 0) {
+        driver.status = 'available';
+        console.log(`Livreur ${driverId} repassé à available`);
+      }
+      await driver.save();
+    }
+
+    await order.save();
+    console.log(`Commande ${id} validée par le livreur ${driverId}`);
+
+    // Envoyer des notifications
+    await sendNotification(order.clientId, `Votre commande (ID: ${order._id}) a été livrée ! Vous avez gagné ${points} points de fidélité.`);
+    await sendNotification(driverId, `Commande ${id} validée avec succès.`);
+
+    res.status(200).json({ success: true, message: 'Livraison validée avec succès.', order });
+  } catch (error) {
+    console.error('Erreur lors de la validation de la livraison par le livreur:', error.message);
+    res.status(500).json({ success: false, message: 'Erreur serveur', error: error.message });
   }
 };

@@ -25,6 +25,10 @@ const productSchema = new mongoose.Schema({
     type: String,
     default: '',
   },
+  promotedPrice: {
+    type: Number,
+    default: null,
+  },
 });
 
 const orderSchema = new mongoose.Schema({
@@ -148,9 +152,9 @@ const orderSchema = new mongoose.Schema({
     default: false,
   },
   paymentMethod: {
-  type: String,
-  enum: ['Flooz', 'TMoney', 'cash', 'wallet'],
-  required: false,
+    type: String,
+    enum: ['Flooz', 'TMoney', 'cash', 'wallet'],
+    required: false,
   },
   validationCode: { 
     type: String,
@@ -172,7 +176,6 @@ const orderSchema = new mongoose.Schema({
 
 orderSchema.pre('save', async function(next) {
   this.updatedAt = Date.now();
-
 
   // Mettre à jour queuePosition si le statut est pending_validation ou awaiting_validator
   if (['pending_validation', 'awaiting_validator'].includes(this.status)) {

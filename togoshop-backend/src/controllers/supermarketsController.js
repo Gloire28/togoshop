@@ -1,6 +1,8 @@
 const Supermarket = require('../models/Supermarket');
 const Manager = require('../models/Manager');
 const mongoose = require('mongoose');
+const Promotion = require('../models/Promotion');
+const Product = require('../models/Product');
 
 // Créer un nouveau supermarché
 exports.createSupermarket = async (req, res) => {
@@ -39,7 +41,7 @@ exports.createSupermarket = async (req, res) => {
       longitude: location.coordinates.lng,
     }));
 
-    // Créer le supermarché
+    // Créer le supermarché avec les nouveaux champs par défaut
     const supermarketData = {
       _id: new mongoose.Types.ObjectId().toString(),
       name,
@@ -48,6 +50,9 @@ exports.createSupermarket = async (req, res) => {
       locations: mappedLocations,
       branding: branding || {},
       managers: [],
+      status: 'open', // Par défaut
+      closureReason: null, // Par défaut
+      scheduledClosure: { start: null, end: null }, // Par défaut
     };
 
     console.log('Données du supermarché avant création:', supermarketData);
@@ -83,7 +88,7 @@ exports.getSupermarket = async (req, res) => {
 exports.updateSupermarket = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, subscriptionPlan, subscriptionStatus, locations, branding } = req.body;
+    const { name, subscriptionPlan, subscriptionStatus, locations, branding, status, closureReason, scheduledClosure } = req.body;
 
     const supermarket = await Supermarket.findById(id);
     if (!supermarket) {
@@ -104,6 +109,14 @@ exports.updateSupermarket = async (req, res) => {
     if (subscriptionPlan) supermarket.subscriptionPlan = subscriptionPlan;
     if (subscriptionStatus) supermarket.subscriptionStatus = subscriptionStatus;
     if (branding) supermarket.branding = branding;
+    if (status && ['open', 'closed', 'maintenance'].includes(status)) supermarket.status = status;
+    if (closureReason !== undefined) supermarket.closureReason = closureReason;
+    if (scheduledClosure && scheduledClosure.start && scheduledClosure.end) {
+      if (new Date(scheduledClosure.start) > new Date(scheduledClosure.end)) {
+        return res.status(400).json({ message: 'La date de début de fermeture doit être antérieure à la date de fin.' });
+      }
+      supermarket.scheduledClosure = scheduledClosure;
+    }
 
     if (locations && Array.isArray(locations)) {
       for (const location of locations) {
@@ -145,5 +158,80 @@ exports.getAllSupermarkets = async (req, res) => {
   } catch (error) {
     console.error('Erreur lors de la récupération des supermarchés:', error.message);
     res.status(500).json({ message: 'Erreur lors de la récupération des supermarchés', error: error.message });
+  }
+};
+
+// Basculer l'état du supermarché
+exports.toggleSupermarketStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, closureReason, scheduledClosure } = req.body;
+
+    // Récupérer le supermarché
+    const supermarket = await Supermarket.findById(id);
+    if (!supermarket) {
+      return res.status(404).json({ message: 'Supermarché non trouvé' });
+    }
+
+    // Vérifier que l'utilisateur est un manager associé
+    const manager = supermarket.managers.find(m => m.managerId === req.user.id);
+    if (!manager) {
+      return res.status(403).json({ message: 'Accès réservé aux managers de ce supermarché' });
+    }
+
+    // Valider le statut
+    if (!status || !['open', 'closed', 'maintenance'].includes(status)) {
+      return res.status(400).json({ message: 'Statut invalide. Utilisez "open", "closed" ou "maintenance".' });
+    }
+
+    // Mettre à jour les champs
+    supermarket.status = status;
+    supermarket.updatedAt = Date.now();
+    if (closureReason !== undefined) {
+      supermarket.closureReason = closureReason || null;
+    }
+    if (scheduledClosure && scheduledClosure.start && scheduledClosure.end) {
+      if (new Date(scheduledClosure.start) > new Date(scheduledClosure.end)) {
+        return res.status(400).json({ message: 'La date de début de fermeture doit être antérieure à la date de fin.' });
+      }
+      supermarket.scheduledClosure = scheduledClosure;
+    } else {
+      supermarket.scheduledClosure = { start: null, end: null };
+    }
+
+    // Synchroniser explicitement isOpen (bien que le hook pre('save') le fera)
+    supermarket.isOpen = status === 'open';
+
+    // Sauvegarder pour déclencher le hook pre('save')
+    const updatedSupermarket = await supermarket.save();
+
+    // Log de l'action
+    console.log(`Statut modifié par ${req.user.id}: ${supermarket.status} -> ${status} à ${new Date().toISOString()}`);
+
+    res.status(200).json({ message: 'Statut du supermarché mis à jour avec succès', supermarket: updatedSupermarket });
+  } catch (error) {
+    console.error('Erreur lors du basculement du statut:', error.message);
+    res.status(500).json({ message: 'Erreur lors de la mise à jour du statut', error: error.message });
+  }
+};
+
+// Récupérer l'état du supermarché
+exports.getSupermarketStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const supermarket = await Supermarket.findById(id, 'status isOpen closureReason scheduledClosure');
+    if (!supermarket) {
+      return res.status(404).json({ message: 'Supermarché non trouvé' });
+    }
+
+    res.status(200).json({
+      status: supermarket.status,
+      isOpen: supermarket.isOpen,
+      closureReason: supermarket.closureReason,
+      scheduledClosure: supermarket.scheduledClosure,
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Erreur lors de la récupération du statut', error: error.message });
   }
 };

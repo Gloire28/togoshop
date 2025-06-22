@@ -36,14 +36,35 @@ const supermarketSchema = new mongoose.Schema({
       required: true,
     },
     role: {
-      type: String,
-      enum: ['order_validator', 'stock_manager'],
+      type: [String], // Tableau pour les rôles
+      enum: ['order_validator', 'stock_manager', 'manager'],
       required: true,
     },
   }],
   branding: {
     logoUrl: String,
     primaryColor: String,
+  },
+  status: {
+    type: String,
+    enum: ['open', 'closed', 'maintenance'],
+    default: 'open',
+    required: true,
+  },
+  isOpen: { // Nouveau champ
+    type: Boolean,
+    default: true,
+  },
+  closureReason: {
+    type: String,
+    default: null,
+  },
+  scheduledClosure: {
+    type: {
+      start: { type: Date, default: null },
+      end: { type: Date, default: null },
+    },
+    default: { start: null, end: null },
   },
   createdAt: {
     type: Date,
@@ -57,6 +78,12 @@ const supermarketSchema = new mongoose.Schema({
 
 supermarketSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
+  // Synchroniser isOpen avec status : true uniquement si status est 'open'
+  this.isOpen = this.status === 'open';
+  if (this.scheduledClosure.start && this.scheduledClosure.end && this.scheduledClosure.start > this.scheduledClosure.end) {
+    const err = new Error('La date de début de fermeture doit être antérieure à la date de fin.');
+    return next(err);
+  }
   next();
 });
 

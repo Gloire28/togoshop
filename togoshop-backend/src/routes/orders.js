@@ -12,32 +12,31 @@ router.use((req, res, next) => {
   next();
 });
 
-// Récupérer les commandes en attente du manager connecté
+// Routes statiques (chemins fixes)
 router.get('/manager', auth, ordersController.getManagerOrders);
-
-// Récupérer les commandes assignées au livreur connecté
 router.get('/driver/me', auth, ordersController.getDriverOrders);
-
-// Routes existantes
-router.post('/', auth, ordersController.createOrder);
-router.get('/supermarket/:supermarketId/pending', auth, ordersController.getPendingOrders);
 router.get('/user/cart', auth, ordersController.getUserCart);
 router.get('/user/me', auth, ordersController.getMyOrders);
 router.get('/user/history', auth, ordersController.getUserOrderHistory);
-router.get('/:id', auth, ordersController.getOrderById);
-router.put('/:id', auth, ordersController.updateOrder);
-router.put('/:id/status', auth, ordersController.updateOrderStatus);
-router.post('/:id/upload-photo', auth, ordersController.uploadPhoto);
 router.post('/user/cart', auth, ordersController.addToCart);
+router.post('/', auth, ordersController.createOrder);
+router.get('/supermarket/:supermarketId/pending', auth, ordersController.getPendingOrders);
+
+// Routes dynamiques spécifiques (/:id/quelque-chose)
+router.post('/:id/validate-delivery-driver', auth, ordersController.validateDeliveryByDriver);
+router.post('/:id/validate-delivery', auth, ordersController.validateDelivery);
+router.post('/:id/upload-photo', auth, ordersController.uploadPhoto);
 router.put('/:id/submit', auth, (req, res, next) => {
   console.log(`Route spécifique /:id/submit appelée avec id: ${req.params.id}`);
   next();
 }, ordersController.submitOrder);
+router.put('/:id/status', auth, ordersController.updateOrderStatus);
 
-// Valider une livraison (par le client)
-router.post('/:id/validate-delivery', auth, ordersController.validateDelivery);
+// Routes dynamiques génériques (/:id)
+router.get('/:id', auth, ordersController.getOrderById);
+router.put('/:id', auth, ordersController.updateOrder);
 
-// Debug produit
+// Route de débogage
 router.get('/debug/product/:id', auth, async (req, res) => {
   try {
     const product = await Product.findOne({ _id: new mongoose.Types.ObjectId(req.params.id) });

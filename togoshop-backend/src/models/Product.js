@@ -20,9 +20,9 @@ const productSchema = new mongoose.Schema({
     enum: ['Fruits', 'Légumes', 'Vêtements', 'Électronique', 'Viandes', 'Produits Laitiers', 'Épicerie', 'Boissons', 'Autres', 'Céréales'],
   },
   supermarketId: {
-    type: mongoose.Schema.Types.ObjectId, 
+    type: mongoose.Schema.Types.ObjectId,
     required: true,
-    ref: 'Supermarket' 
+    ref: 'Supermarket'
   },
   stockByLocation: [{
     locationId: {
@@ -52,6 +52,15 @@ const productSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+  promotedPrice: {
+    type: Number, // Nouveau champ pour stocker le prix promu (optionnel)
+    default: null,
+  },
+  activePromotion: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Promotion', // Référence à la promotion active (facultatif)
+    default: null,
+  },
   createdAt: {
     type: Date,
     default: Date.now,
@@ -66,5 +75,17 @@ productSchema.pre('save', function(next) {
   this.updatedAt = Date.now();
   next();
 });
+
+// Hook pour mettre à jour promotedPrice si une promotion est appliquée (à activer via contrôleur)
+productSchema.methods.updatePromotedPrice = function(discountType, discountValue) {
+  if (discountType === 'percentage') {
+    this.promotedPrice = this.price * (1 - discountValue / 100);
+  } else if (discountType === 'fixed') {
+    this.promotedPrice = Math.max(0, this.price - discountValue);
+  } else {
+    this.promotedPrice = null;
+  }
+  return this.save();
+};
 
 module.exports = mongoose.model('Product', productSchema);

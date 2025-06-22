@@ -3,6 +3,8 @@ const User = require('../models/User');
 const Manager = require('../models/Manager');
 const Driver = require('../models/Driver');
 const Order = require('../models/Order');
+const Supermarket = require('../models/Supermarket');
+const Promotion = require('../models/Promotion');
 
 // Tableau de permissions strictes (routes spécifiques en premier)
 const permissions = [
@@ -13,33 +15,79 @@ const permissions = [
   { path: '/me/availability', method: 'PUT', baseUrl: '/api/managers', roles: ['manager', 'order_validator', 'stock_manager'] },
   { path: '/:id/submit', method: 'PUT', baseUrl: '/api/orders', roles: ['client'] },
   { path: '/:id/validate-delivery', method: 'POST', baseUrl: '/api/orders', roles: ['client'] },
-  { path: '/:id/resend-validation-code', method: 'POST', baseUrl: '/api/orders', roles: ['client'], additionalCheck: async (req) => {
-  const orderId = req.params.id;
-  const order = await Order.findById(orderId);
-  if (!order) return false;
-  return order.clientId.toString() === req.user.id && order.status === 'delivered';
-  }},
-  { path: '/:id', method: 'GET', baseUrl: '/api/orders', roles: ['client'], additionalCheck: async (req) => {
-    const orderId = req.params.id;
-    const order = await Order.findById(orderId);
-    if (!order) return false;
-    return order.clientId.toString() === req.user.id;
-  }},
-  { path: '/:id', method: 'PUT', baseUrl: '/api/orders', roles: ['client'], additionalCheck: async (req) => {
-    const orderId = req.params.id;
-    const order = await Order.findById(orderId);
-    if (!order) return false;
-    return order.clientId.toString() === req.user.id && ['cart_in_progress', 'pending_validation', 'awaiting_validator'].includes(order.status);
-  }},
-  { path: '/:id/status', method: 'PUT', baseUrl: '/api/orders', roles: ['manager', 'order_validator', 'stock_manager'], additionalCheck: async (req) => {
-    const orderId = req.params.id;
-    const order = await Order.findById(orderId);
-    if (!order) return false;
-    const user = req.user;
-    return order.supermarketId.toString() === user.supermarketId && 
-           (order.assignedManager?.toString() === user.id || !order.assignedManager);
-  }},
+  { 
+    path: '/:id/validate-delivery-driver', 
+    method: 'POST', 
+    baseUrl: '/api/orders', 
+    roles: ['driver'],
+    additionalCheck: async (req) => {
+      const orderId = req.params.id;
+      const order = await Order.findById(orderId);
+      if (!order) return false;
+      return order.driverId.toString() === req.user.id && order.status === 'in_delivery';
+    }
+  },
+  { 
+    path: '/:id/resend-validation-code', 
+    method: 'POST', 
+    baseUrl: '/api/orders', 
+    roles: ['client'], 
+    additionalCheck: async (req) => {
+      const orderId = req.params.id;
+      const order = await Order.findById(orderId);
+      if (!order) return false;
+      return order.clientId.toString() === req.user.id && order.status === 'delivered';
+    }
+  },
+  { 
+    path: '/:id', 
+    method: 'GET', 
+    baseUrl: '/api/orders', 
+    roles: ['client'], 
+    additionalCheck: async (req) => {
+      const orderId = req.params.id;
+      const order = await Order.findById(orderId);
+      if (!order) return false;
+      return order.clientId.toString() === req.user.id;
+    }
+  },
+  { 
+    path: '/:id', 
+    method: 'PUT', 
+    baseUrl: '/api/orders', 
+    roles: ['client'], 
+    additionalCheck: async (req) => {
+      const orderId = req.params.id;
+      const order = await Order.findById(orderId);
+      if (!order) return false;
+      return order.clientId.toString() === req.user.id && ['cart_in_progress', 'pending_validation', 'awaiting_validator'].includes(order.status);
+    }
+  },
+  { 
+    path: '/:id/status', 
+    method: 'PUT', 
+    baseUrl: '/api/orders', 
+    roles: ['manager', 'order_validator', 'stock_manager'], 
+    additionalCheck: async (req) => {
+      const orderId = req.params.id;
+      const order = await Order.findById(orderId);
+      if (!order) return false;
+      const user = req.user;
+      return order.supermarketId.toString() === user.supermarketId && 
+             (order.assignedManager?.toString() === user.id || !order.assignedManager);
+    }
+  },
   { path: '/:id', method: 'GET', baseUrl: '/api/products', roles: ['client', 'driver', 'manager', 'admin'] },
+  { 
+    path: '/supermarket/:supermarketId', 
+    method: 'GET', 
+    baseUrl: '/api/products', 
+    roles: ['manager', 'order_validator', 'stock_manager'], 
+    additionalCheck: async (req) => {
+      const { supermarketId } = req.params;
+      return req.user.supermarketId === supermarketId;
+    }
+  },
   { path: '/:id', method: 'PUT', baseUrl: '/api/products', roles: ['admin', 'stock_manager'] },
   { path: '/', method: 'POST', baseUrl: '/api/products', roles: ['admin', 'stock_manager'] },
   { path: '/:id', method: 'DELETE', baseUrl: '/api/products', roles: ['admin', 'stock_manager'] },
@@ -63,8 +111,67 @@ const permissions = [
   { path: '/me', method: 'GET', baseUrl: '/api/loyalty', roles: ['client'] },
   { path: '/me', method: 'GET', baseUrl: '/api/users', roles: ['client'] },
   { path: '/', method: 'GET', baseUrl: '/api/promotions', roles: ['client', 'driver', 'manager', 'admin'] },
+  { 
+    path: '/supermarket/:supermarketId', 
+    method: 'GET', 
+    baseUrl: '/api/promotions', 
+    roles: ['manager', 'order_validator', 'stock_manager'], 
+    additionalCheck: async (req) => {
+      const { supermarketId } = req.params;
+      return req.user.supermarketId === supermarketId;
+    }
+  },
+  { 
+    path: '/', 
+    method: 'POST', 
+    baseUrl: '/api/promotions', 
+    roles: ['manager', 'order_validator', 'stock_manager'], 
+    additionalCheck: async (req) => {
+      const { supermarketId } = req.body;
+      return req.user.supermarketId === supermarketId;
+    }
+  },
+  { 
+    path: '/:id/toggle-status', 
+    method: 'PATCH', 
+    baseUrl: '/api/supermarkets', 
+    roles: ['manager', 'order_validator', 'stock_manager'], 
+    additionalCheck: async (req) => {
+      const { id } = req.params;
+      const supermarket = await Supermarket.findById(id);
+      if (!supermarket) return false;
+      const manager = supermarket.managers.find(m => m.managerId === req.user.id);
+      return !!manager && (!req.user.supermarketId || supermarket._id.toString() === req.user.supermarketId);
+    }
+  },
+  { path: '/:id/status', method: 'GET', baseUrl: '/api/supermarkets', roles: ['client', 'manager', 'order_validator', 'stock_manager', 'admin'] },
+  { path: '/:id', method: 'GET', baseUrl: '/api/supermarkets', roles: ['client'] },
+  { 
+    path: '/:id', 
+    method: 'PUT', 
+    baseUrl: '/api/promotions', 
+    roles: ['manager', 'order_validator', 'stock_manager'], 
+    additionalCheck: async (req) => {
+      const { id } = req.params;
+      const { supermarketId } = req.body;
+      return req.user.supermarketId === supermarketId;
+    }
+  },
+  { 
+    path: '/:id', 
+    method: 'DELETE', 
+    baseUrl: '/api/promotions', 
+    roles: ['manager', 'order_validator', 'stock_manager'], 
+    additionalCheck: async (req) => {
+      const { id } = req.params;
+      const promotion = await Promotion.findById(id);
+      if (!promotion) return false;
+      return req.user.supermarketId === promotion.supermarketId.toString();
+    }
+  },
 ];
 
+// Fonction pour obtenir une description claire de l'action demandée
 // Fonction pour obtenir une description claire de l'action demandée
 const getActionDescription = (method, baseUrl, path) => {
   if (baseUrl === '/api/managers') {
@@ -73,14 +180,15 @@ const getActionDescription = (method, baseUrl, path) => {
   }
   if (baseUrl === '/api/orders') {
     if (path === 'manager' && method === 'GET') return 'Récupération des commandes du manager';
-    if (path === 'supermarket/:supermarketId/pending' && method === 'GET') return 'Récupération des commandes en attente du supermarché';
-    if (path === ':id/submit' && method === 'PUT') return 'Soumission d\'une commande';
-    if (path === ':id/validate-delivery' && method === 'POST') return 'Validation de la livraison d\'une commande';
-    if (path === ':id/resend-validation-code' && method === 'POST') return 'Renvoi du code de validation pour une commande';
-    if (path === ':id' && method === 'GET') return 'Récupération des détails d\'une commande';
-    if (path === ':id' && method === 'PUT') return 'Mise à jour d\'une commande';
-    if (path === ':id/status' && method === 'PUT') return 'Mise à jour du statut d\'une commande';
-    if (method === 'POST') return 'Création d\'une nouvelle commande';
+    if (path.match(/^supermarket\/[0-9a-fA-F]{24}\/pending$/) && method === 'GET') return 'Récupération des commandes en attente du supermarché';
+    if (path.match(/^[0-9a-fA-F]{24}\/submit$/) && method === 'PUT') return 'Soumission d\'une commande';
+    if (path.match(/^[0-9a-fA-F]{24}\/validate-delivery$/) && method === 'POST') return 'Validation de la livraison d\'une commande par le client';
+    if (path.match(/^[0-9a-fA-F]{24}\/validate-delivery-driver$/) && method === 'POST') return 'Validation de la livraison d\'une commande par le livreur';
+    if (path.match(/^[0-9a-fA-F]{24}\/resend-validation-code$/) && method === 'POST') return 'Renvoi du code de validation pour une commande';
+    if (path.match(/^[0-9a-fA-F]{24}$/) && method === 'GET') return 'Récupération des détails d\'une commande';
+    if (path.match(/^[0-9a-fA-F]{24}$/) && method === 'PUT') return 'Mise à jour d\'une commande';
+    if (path.match(/^[0-9a-fA-F]{24}\/status$/) && method === 'PUT') return 'Mise à jour du statut d\'une commande';
+    if (method === 'POST' && path === '') return 'Création d\'une nouvelle commande';
     if (path === 'user/me' && method === 'GET') return 'Récupération des commandes de l\'utilisateur';
     if (path === 'user/history' && method === 'GET') return 'Récupération de l\'historique des commandes';
     if (path === 'user/cart' && method === 'GET') return 'Récupération du panier de l\'utilisateur';
@@ -88,10 +196,11 @@ const getActionDescription = (method, baseUrl, path) => {
     if (path === 'driver/me' && method === 'GET') return 'Récupération des commandes du livreur';
   }
   if (baseUrl === '/api/products') {
-    if (path === ':id' && method === 'GET') return 'Récupération des détails d\'un produit';
-    if (path === ':id' && method === 'PUT') return 'Mise à jour d\'un produit';
+    if (path.match(/^[0-9a-fA-F]{24}$/) && method === 'GET') return 'Récupération des détails d\'un produit';
+    if (path.match(/^supermarket\/[0-9a-fA-F]{24}$/) && method === 'GET') return 'Récupération des produits d\'un supermarché';
+    if (path.match(/^[0-9a-fA-F]{24}$/) && method === 'PUT') return 'Mise à jour d\'un produit';
     if (method === 'POST') return 'Création d\'un nouveau produit';
-    if (path === ':id' && method === 'DELETE') return 'Suppression d\'un produit';
+    if (path.match(/^[0-9a-fA-F]{24}$/) && method === 'DELETE') return 'Suppression d\'un produit';
   }
   if (baseUrl === '/api/auth') {
     if (path === 'login' && method === 'POST') return 'Connexion de l\'utilisateur';
@@ -100,21 +209,29 @@ const getActionDescription = (method, baseUrl, path) => {
     if (path === 'me' && method === 'GET') return 'Récupération des informations du livreur';
     if (path === 'location' && method === 'PUT') return 'Mise à jour de la position du livreur';
     if (path === 'discoverable' && method === 'PUT') return 'Mise à jour de la visibilité du livreur';
-    if (path === ':id/location' && method === 'GET') return 'Récupération de la position d\'un livreur';
+    if (path.match(/^[0-9a-fA-F]{24}\/location$/) && method === 'GET') return 'Récupération de la position d\'un livreur';
     if (path === 'orders/accept' && method === 'POST') return 'Acceptation d\'une commande par le livreur';
     if (path === 'orders/reject' && method === 'POST') return 'Rejet d\'une commande par le livreur';
     if (path === 'orders/status' && method === 'PUT') return 'Mise à jour du statut d\'une commande par le livreur';
     if (path === 'orders/report-issue' && method === 'POST') return 'Signalement d\'un problème de livraison par le livreur';
     if (path === 'register' && method === 'POST') return 'Inscription d\'un nouveau livreur';
   }
-  if (baseUrl === '/api/supermarkets' && method === 'GET') return 'Récupération de la liste des supermarchés';
+  if (baseUrl === '/api/supermarkets' && method === 'GET' && path === '') return 'Récupération de la liste des supermarchés';
   if (baseUrl === '/api/loyalty') {
     if (path === 'points' && method === 'GET') return 'Récupération des points de fidélité';
     if (path === 'me' && method === 'GET') return 'Récupération des informations de fidélité';
   }
-  if (baseUrl === '/api/promotions' && method === 'GET') return 'Récupération des promotions';
+  if (baseUrl === '/api/promotions') {
+    if (path === '' && method === 'GET') return 'Récupération des promotions';
+    if (path.match(/^supermarket\/[0-9a-fA-F]{24}$/) && method === 'GET') return 'Récupération des promotions d\'un supermarché';
+    if (path === '' && method === 'POST') return 'Création d\'une nouvelle promotion';
+  }
   if (baseUrl === '/api/users' && path === 'me' && method === 'GET') return 'Récupération des informations de l\'utilisateur';
-
+  if (baseUrl === '/api/supermarkets') {
+    if (path.match(/^[0-9a-fA-F]{24}\/toggle-status$/) && method === 'PATCH') return 'Basculement de l\'état du supermarché';
+    if (path.match(/^[0-9a-fA-F]{24}\/status$/) && method === 'GET') return 'Récupération de l\'état du supermarché';
+    if (path.match(/^[0-9a-fA-F]{24}$/) && method === 'GET') return 'Récupération des détails d\'un supermarché';
+  }
   return 'Action inconnue';
 };
 
@@ -133,16 +250,20 @@ const getSectionDescription = (baseUrl) => {
 };
 
 module.exports = async (req, res, next) => {
+  console.log('authMiddleware appelé pour:', req.originalUrl, 'avec baseUrl:', req.baseUrl, 'et chemin normalisé:', req.path.substring(1));
   try {
-    console.log('=== Une action a été demandée ===');
-    
+    console.log('Entrée dans le try de authMiddleware');
     // Normaliser req.baseUrl
     let baseUrl = req.baseUrl || '';
+    if (!baseUrl && req.originalUrl.includes('/api/supermarkets')) {
+      baseUrl = '/api/supermarkets';
+    }
     if (baseUrl.endsWith('/')) {
       baseUrl = baseUrl.slice(0, -1);
     }
-
-    // Calculer le chemin relatif avec gestion explicite de l'ID
+    console.log(`Base URL détectée: ${baseUrl}`);
+    
+    // Calculer le chemin relatif
     let path = req.path;
     if (path.startsWith('/')) {
       path = path.substring(1);
@@ -150,12 +271,10 @@ module.exports = async (req, res, next) => {
     if (path.endsWith('/')) {
       path = path.slice(0, -1);
     }
+    console.log(`Chemin détecté: ${path}`);
 
     const method = req.method;
-    const action = getActionDescription(method, baseUrl, path);
     const section = getSectionDescription(baseUrl);
-    
-    console.log(`Action : ${action}`);
     console.log(`Où : ${section}`);
     console.log('Début de la vérification : Vérification si l\'utilisateur peut faire cette action...');
 
@@ -172,6 +291,7 @@ module.exports = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret');
+    console.log('Token décodé', decoded);
     
     let user = null;
     const role = decoded.role;
@@ -214,35 +334,34 @@ module.exports = async (req, res, next) => {
     const rolesList = req.user.roles.length > 0 ? req.user.roles.join(' et ') : 'aucun rôle supplémentaire';
     console.log(`Utilisateur trouvé : C\'est un ${req.user.role} avec les rôles "${rolesList}"`);
 
-    // Recherche de la permission correspondante avec gestion améliorée des paramètres
+    // Recherche de la permission correspondante avec gestion des paramètres dynamiques
     const permission = permissions.find(p => {
       let normalizedPermissionPath = p.path;
       if (normalizedPermissionPath.startsWith('/')) {
         normalizedPermissionPath = normalizedPermissionPath.substring(1);
       }
 
-      // Vérifier si le chemin contient un ID suivi de /status
-      const pathParts = path.split('/');
-      const isIdStatusRoute = pathParts.length === 2 && /^[0-9a-fA-F]{24}$/.test(pathParts[0]) && pathParts[1] === 'status';
-      const isIdSubmitRoute = pathParts.length === 2 && /^[0-9a-fA-F]{24}$/.test(pathParts[0]) && pathParts[1] === 'submit';
-      const isIdValidateDeliveryRoute = pathParts.length === 2 && /^[0-9a-fA-F]{24}$/.test(pathParts[0]) && pathParts[1] === 'validate-delivery';
-      const isIdLocationRoute = pathParts.length === 2 && /^[0-9a-fA-F]{24}$/.test(pathParts[0]) && pathParts[1] === 'location';
-      const isIdRoute = normalizedPermissionPath === ':id' && /^[0-9a-fA-F]{24}$/.test(path);
-      
-      // Vérifier si le chemin correspond exactement à la permission ou suit un pattern avec :id
-      let pathMatch = normalizedPermissionPath === path || isIdRoute;
-      if (normalizedPermissionPath === ':id/status') {
-        pathMatch = isIdStatusRoute;
-      } else if (normalizedPermissionPath === ':id/submit') {
-        pathMatch = isIdSubmitRoute;
-      } else if (normalizedPermissionPath === ':id/validate-delivery') {
-        pathMatch = isIdValidateDeliveryRoute;
-      } else if (normalizedPermissionPath === ':id/location') {
-        pathMatch = isIdLocationRoute;
+      // Décomposer les chemins en segments
+      const permissionSegments = normalizedPermissionPath.split('/');
+      const requestSegments = path.split('/');
+
+      // Vérifier si les segments correspondent (en tenant compte des paramètres dynamiques comme :id)
+      let pathMatch = false;
+      if (permissionSegments.length === requestSegments.length) {
+        pathMatch = permissionSegments.every((segment, index) => {
+          if (segment.startsWith(':')) {
+            // Segment dynamique (ex. :id) : vérifier que le segment de la requête est valide (ex. ObjectId pour :id)
+            if (segment === ':id' || segment === ':supermarketId') {
+              return /^[0-9a-fA-F]{24}$/.test(requestSegments[index]);
+            }
+            return true;
+          }
+          return segment === requestSegments[index];
+        });
       }
 
-      const baseUrlMatch = p.baseUrl === baseUrl || (p.baseUrl === baseUrl.replace(/\/$/, '') && baseUrl !== '');
-      console.log(`Test permission - p.path: ${p.path}, normalizedPermissionPath: ${normalizedPermissionPath}, path: ${path}, isIdStatusRoute: ${isIdStatusRoute}, isIdRoute: ${isIdRoute}, pathMatch: ${pathMatch}, baseUrlMatch: ${baseUrlMatch}`);
+      const baseUrlMatch = p.baseUrl === baseUrl || (baseUrl === '' && p.baseUrl === '/api') || p.baseUrl === '/api' + baseUrl;
+      console.log(`Test permission - p.path: ${p.path}, normalizedPermissionPath: ${normalizedPermissionPath}, path: ${path}, pathMatch: ${pathMatch}, baseUrlMatch: ${baseUrlMatch}`);
       return pathMatch && p.method === method && baseUrlMatch;
     });
 
@@ -269,6 +388,8 @@ module.exports = async (req, res, next) => {
       }
     }
 
+    const action = getActionDescription(method, baseUrl, path);
+    console.log(`Action : ${action}`);
     console.log(`Vérification réussie : L\'utilisateur a le droit de faire cette action`);
     console.log(`Action autorisée : ${action}`);
     next();

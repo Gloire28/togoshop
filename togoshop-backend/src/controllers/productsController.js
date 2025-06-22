@@ -29,6 +29,10 @@ exports.createProduct = async (req, res) => {
       return res.status(404).json({ message: 'Supermarché non trouvé' });
     }
 
+    if (supermarket.status !== 'open') {
+      return res.status(400).json({ message: 'Impossible de créer un produit pour un supermarché fermé' });
+    }
+
     const supermarketObj = supermarket.toObject();
 
     for (const stock of stockByLocation) {
@@ -149,7 +153,7 @@ exports.getSubstitutes = async (req, res) => {
       return res.status(400).json({ message: 'ID du supermarché invalide' });
     }
 
-    const supermarket = await Supermarket.findById(supermarketId);
+    const supermarket = await Supermarket.findById(supermarketId, 'status');
     if (!supermarket) {
       return res.status(404).json({ message: 'Supermarché non trouvé' });
     }
@@ -167,7 +171,12 @@ exports.getSubstitutes = async (req, res) => {
       stockByLocation: {
         $elemMatch: { locationId: locationId, stock: { $gt: 0 } }
       }
-    }).limit(4);
+    }).lean();
+
+    // Réinitialiser promotedPrice si le supermarché est fermé
+    if (supermarket.status !== 'open') {
+      substitutes.forEach(sub => { sub.promotedPrice = null; });
+    }
 
     res.status(200).json(substitutes);
   } catch (error) {
@@ -196,6 +205,10 @@ exports.updateProduct = async (req, res) => {
     const supermarket = await Supermarket.findById(product.supermarketId);
     if (!supermarket) {
       return res.status(404).json({ message: 'Supermarché non trouvé' });
+    }
+
+    if (supermarket.status !== 'open') {
+      return res.status(400).json({ message: 'Impossible de modifier un produit pour un supermarché fermé' });
     }
 
     const supermarketObj = supermarket.toObject();
