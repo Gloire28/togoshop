@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useContext } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiRequest } from '../../shared/services/api';
+import { AppContext } from '../../shared/context/AppContext';
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const { refreshData } = useContext(AppContext);
 
   const handleLogin = async () => {
     try {
@@ -15,15 +17,19 @@ export default function LoginScreen({ navigation }) {
         method: 'POST',
         body: { email, password, role: 'manager' },
       });
-      const { token } = response;
-      console.log('Token reçu lors de la connexion:', token);
+      const { token, user } = response; // Supposant que l'API renvoie { token, user }
+      console.log('Token et user reçus:', { token, user });
 
-      // Stocker le token dans AsyncStorage
+      // Stocker le token et l'utilisateur dans AsyncStorage
       await AsyncStorage.setItem('token', token);
-      console.log('Token stocké dans AsyncStorage');
+      await AsyncStorage.setItem('user', JSON.stringify(user));
+      console.log('Token et user stockés dans AsyncStorage');
+
+      // Rafraîchir les données dans AppContext
+      if (refreshData) await refreshData();
 
       Alert.alert('Succès', 'Connexion réussie !');
-      navigation.navigate('Dashboard'); // Assure-toi que 'Dashboard' redirige vers 'OrderScreen'
+      navigation.navigate('Dashboard');
     } catch (error) {
       Alert.alert('Erreur', 'Échec de la connexion.');
       console.log('Erreur lors de la connexion:', error.message);

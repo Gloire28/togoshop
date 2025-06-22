@@ -105,7 +105,8 @@ export default function DeliveryAddressScreen({ route, navigation }) {
           alternativeLocationId: item.alternativeLocationId || '',
           comment: item.comment || '',
           photoUrl: item.photoUrl || '',
-        })), // Inclure les produits existants
+          promotedPrice: item.promotedPrice || null, // Inclure promotedPrice pour cohérence avec le backend
+        })),
       };
       console.log('Mise à jour de la commande:', { orderId, updatedData });
       if (orderId) {

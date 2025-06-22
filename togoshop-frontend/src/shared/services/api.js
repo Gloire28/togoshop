@@ -55,9 +55,20 @@ export const getSupermarket = (supermarketId) => {
 export const getSupermarkets = () => apiRequest('/supermarkets', { method: 'GET' });
 
 // Récupérer les produits d’un supermarché pour une localisation donnée
-export const getProducts = (supermarketId, locationId) => {
+export const getProducts = async (supermarketId, locationId) => {
   if (!supermarketId || !locationId) throw new Error('Paramètres manquants');
-  return apiRequest(`/products/supermarket/${supermarketId}?locationId=${locationId}`, { method: 'GET' });
+  try {
+    const productsData = await apiRequest(`/products/supermarket/${supermarketId}?locationId=${locationId}`, { method: 'GET' });
+    const products = productsData.data || productsData; // Adapter selon la structure de la réponse API
+
+    // Pas d'enrichissement artificiel, juste retour des données brutes
+    const enrichedProducts = products.map(product => product); // Identité pour l'instant
+
+    console.log('Produits récupérés avec promotedPrice:', enrichedProducts);
+    return enrichedProducts; // Retourner directement le tableau
+  } catch (error) {
+    throw error;
+  }
 };
 
 // Récupérer les promotions actives
@@ -68,8 +79,6 @@ export const createOrder = (orderData) => apiRequest('/orders', { method: 'POST'
 
 // Récupérer le panier de l’utilisateur
 export const getUserCart = () => apiRequest('/orders/user/cart', { method: 'GET' });
-
-
 
 // Mettre à jour une commande existante
 export const updateOrder = (orderId, orderData) => {
@@ -128,8 +137,6 @@ export const updateDriverLocation = (lat, lng) => apiRequest('/drivers/location'
 // Récupérer les commandes assignées au livreur, incluant les statuts pertinents
 export const getDriverOrders = () => apiRequest('/orders/driver/me?statuses=validated,ready_for_pickup,in_delivery,delivered', { method: 'GET' });
 
-
-
 // Activer/Désactiver la détectabilité du livreur
 export const toggleDriverDiscoverable = () => apiRequest('/drivers/discoverable', { method: 'PUT' });
 
@@ -155,14 +162,19 @@ export const reportDeliveryIssue = (orderId, issueDetails) => {
   if (!orderId || !issueDetails) throw new Error('orderId ou issueDetails manquant pour reportDeliveryIssue');
   return apiRequest('/drivers/orders/report-issue', { method: 'POST', body: { orderId, issueDetails } });
 };
+// Valider une livraison par chauffeur
 
+export const validateDeliveryByDriver = (orderId, validationCode) => {
+  if (!orderId || !validationCode) throw new Error('orderId ou validationCode manquant pour validateDeliveryByDriver');
+  return apiRequest(`/orders/${orderId}/validate-delivery-driver`, { method: 'POST', body: { validationCode } });
+};
 // Valider une livraison (côté client)
 export const validateDelivery = (orderId) => {
   if (!orderId) throw new Error('orderId manquant pour validateDelivery');
   return apiRequest(`/orders/${orderId}/validate-delivery`, { method: 'POST', body: { orderId } });
 };
 
-//renvoie de code de validation pour le client, en cas de problème avec la validation de la commande)
+// Renvoie un code de validation pour le client (en cas de problème avec la validation de la commande)
 export const resendValidationCode = (orderId) => {
   if (!orderId) throw new Error('orderId manquant pour resendValidationCode');
   return apiRequest(`/orders/${orderId}/resend-validation-code`, { method: 'POST', body: { orderId } });
@@ -179,10 +191,61 @@ export const getDriverLocation = (driverId) => {
   if (!driverId) throw new Error('driverId manquant pour getDriverLocation');
   return apiRequest(`/drivers/${driverId}/location`, { method: 'GET' });
 };
+
 // Récupérer les informations du profil utilisateur
 export const getUserProfile = () => {
   console.log('Appel de getUserProfile avec endpoint: /users/me');
   const response = apiRequest('/users/me', { method: 'GET' });
   console.log('Réponse de getUserProfile:', response);
   return response;
+};
+
+// Basculement de l'état du supermarché (pour le manager)
+export const toggleSupermarketStatus = (supermarketId, statusData) => {
+  if (!supermarketId) throw new Error('supermarketId manquant pour toggleSupermarketStatus');
+  return apiRequest(`/supermarkets/${supermarketId}/toggle-status`, { method: 'PATCH', body: statusData });
+};
+
+// Récupérer l'état du supermarché
+export const getSupermarketStatus = (supermarketId) => {
+  if (!supermarketId) throw new Error('supermarketId manquant pour getSupermarketStatus');
+  return apiRequest(`/supermarkets/${supermarketId}/status`, { method: 'GET' });
+};
+
+// Récupérer tous les produits d’un supermarché
+export const getSupermarketProducts = (supermarketId) => {
+  if (!supermarketId) throw new Error('supermarketId manquant pour getSupermarketProducts');
+  return apiRequest(`/products/supermarket/${supermarketId}`, { method: 'GET' });
+};
+
+// Créer une nouvelle promotion
+export const createPromotion = (promotionData) => {
+  if (!promotionData) throw new Error('promotionData manquant pour createPromotion');
+  return apiRequest('/promotions', { method: 'POST', body: promotionData });
+};
+
+// Récupérer les promotions d’un supermarché
+export const getSupermarketPromotions = (supermarketId) => {
+  if (!supermarketId) throw new Error('supermarketId manquant pour getSupermarketPromotions');
+  return apiRequest(`/promotions/supermarket/${supermarketId}`, { method: 'GET' });
+};
+
+// Modifier une promotion
+export const updatePromotion = (promotionId, promotionData) => {
+  if (!promotionId) throw new Error('promotionId manquant pour updatePromotion');
+  if (!promotionData) throw new Error('promotionData manquant pour updatePromotion');
+  return apiRequest(`/promotions/${promotionId}`, { method: 'PUT', body: promotionData });
+};
+
+// Supprimer une promotion
+export const deletePromotion = (promotionId) => {
+  if (!promotionId) throw new Error('promotionId manquant pour deletePromotion');
+  return apiRequest(`/promotions/${promotionId}`, { method: 'DELETE' });
+};
+
+// Récupérer le locationId d'une promotion
+export const getPromotionLocation = (supermarketId, createdBy) => {
+  if (!supermarketId) throw new Error('supermarketId manquant pour getPromotionLocation');
+  if (!createdBy) throw new Error('createdBy manquant pour getPromotionLocation');
+  return apiRequest(`/promotion-location?supermarketId=${supermarketId}&createdBy=${createdBy}`, { method: 'GET' });
 };

@@ -16,12 +16,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getSupermarkets, getProducts } from '../../shared/services/api';
+import { getSupermarkets, getProducts, getSupermarketStatus } from '../../shared/services/api';
 import imageMap from '../../assets/imageMap';
 import { AppContext } from '../../shared/context/AppContext';
 
 export default function CatalogueScreen({ navigation }) {
-  const { addToCart, cart } = useContext(AppContext);
+  const { addToCart, cart, user, refreshData } = useContext(AppContext);
   const [state, setState] = useState({
     supermarkets: [],
     loading: true,
@@ -33,6 +33,7 @@ export default function CatalogueScreen({ navigation }) {
     products: [],
     searchQuery: '',
     selectedCategory: 'Tous',
+    supermarketStatus: null,
   });
 
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
@@ -67,11 +68,18 @@ export default function CatalogueScreen({ navigation }) {
     try {
       setState((prev) => ({ ...prev, loading: true }));
       const token = await AsyncStorage.getItem('token');
-      console.log('Token utilisé pour getSupermarkets:', token);
-      console.log('Appel à getSupermarkets avec endpoint:', '/supermarkets', 'et token:', token);
-      const response = await getSupermarkets(token);
-      console.log('Réponse getSupermarkets:', response);
-      setState((prev) => ({ ...prev, supermarkets: response.data || [], loading: false }));
+      const response = await getSupermarkets();
+      const supermarketsWithStatus = await Promise.all(
+        response.data.map(async (supermarket) => {
+          const status = await getSupermarketStatus(supermarket._id);
+          return { ...supermarket, ...status };
+        })
+      );
+      setState((prev) => ({
+        ...prev,
+        supermarkets: supermarketsWithStatus,
+        loading: false,
+      }));
     } catch (err) {
       console.error('Erreur:', err);
       setState((prev) => ({
@@ -92,37 +100,26 @@ export default function CatalogueScreen({ navigation }) {
       Alert.alert('Erreur', 'Supermarché invalide.');
       return;
     }
-    setState((prev) => {
-      console.log('Supermarché sélectionné:', supermarket);
-      return {
-        ...prev,
-        selectedSupermarket: supermarket,
-        locations: supermarket.locations || [],
-        currentStep: 'locations',
-      };
-    });
+    setState((prev) => ({
+      ...prev,
+      selectedSupermarket: supermarket,
+      locations: supermarket.locations || [],
+      currentStep: 'locations',
+      supermarketStatus: supermarket,
+    }));
   }, []);
 
   const fetchProducts = useCallback(async (supermarket, locationId) => {
     try {
       setState((prev) => ({ ...prev, loading: true }));
-      const token = await AsyncStorage.getItem('token');
       if (!supermarket || !supermarket._id) {
-        console.log('État avant erreur:', { supermarket, locationId });
         throw new Error('Aucun supermarché sélectionné');
       }
-      console.log('Appel de getProducts avec:', {
-        supermarketId: supermarket._id,
-        locationId,
-        token,
-      });
-      const response = await getProducts(supermarket._id, locationId, token);
-      console.log('Réponse getProducts brute:', response);
+      const response = await getProducts(supermarket._id, locationId);
       const products = Array.isArray(response) ? response : [];
-      console.log('Produits extraits:', products);
       setState((prev) => ({
         ...prev,
-        products: products,
+        products,
         selectedLocationId: locationId,
         loading: false,
         currentStep: 'products',
@@ -143,7 +140,11 @@ export default function CatalogueScreen({ navigation }) {
   }, []);
 
   const addToCartHandler = useCallback(
-    async (product) => { // Rendu asynchrone pour attendre addToCart
+    async (product) => {
+      if (!state.supermarketStatus?.isOpen) {
+        Alert.alert('Site fermé', 'Les achats sont désactivés lorsque le site est fermé.');
+        return;
+      }
       const stockAtLocation = product.stockByLocation.find(
         (stock) => stock.locationId === state.selectedLocationId
       ) || { stock: 0 };
@@ -151,9 +152,6 @@ export default function CatalogueScreen({ navigation }) {
         Alert.alert('Erreur de stock', 'Stock indisponible.');
         return;
       }
-      console.log('Produit ajouté au panier:', product);
-      console.log('État avant addToCart - selectedSupermarket:', state.selectedSupermarket);
-      console.log('État avant addToCart - selectedLocationId:', state.selectedLocationId);
       const result = await addToCart({
         ...product,
         locationId: state.selectedLocationId,
@@ -163,9 +161,8 @@ export default function CatalogueScreen({ navigation }) {
         Vibration.vibrate(200);
         Alert.alert('Succès', `${product.name} ajouté au panier !`);
       }
-      // L'erreur est déjà affichée dans addToCart, donc pas besoin de la gérer ici
     },
-    [state.selectedLocationId, state.selectedSupermarket, addToCart]
+    [state.selectedLocationId, state.selectedSupermarket, addToCart, state.supermarketStatus]
   );
 
   const filteredProducts = useCallback(() => {
@@ -184,13 +181,15 @@ export default function CatalogueScreen({ navigation }) {
 
   const renderItem = useCallback(
     ({ item, type }) => {
-      console.log('Rendu item:', item, 'Type:', type);
       switch (type) {
         case 'supermarket':
           return (
             <TouchableOpacity style={styles.supermarketItem} onPress={() => fetchLocations(item)}>
               <Text style={styles.itemText}>{item.name}</Text>
-              <Text style={styles.subText}>{item.locations.length} site(s)</Text>
+              <Text style={styles.subText}>
+                {item.locations.length} site(s) -{' '}
+                {item.isOpen ? 'Ouvert' : `Fermé (${item.status || 'Inconnu'})`}
+              </Text>
             </TouchableOpacity>
           );
         case 'location':
@@ -204,9 +203,21 @@ export default function CatalogueScreen({ navigation }) {
           const stockAtLocation = item.stockByLocation?.find((s) => s.locationId === state.selectedLocationId) || { stock: 0 };
           const stockColor = stockAtLocation.stock > 15 ? '#00FF00' : stockAtLocation.stock >= 7 ? '#FFD700' : '#FF0000';
           const imageSource = imageMap[item._id] || null;
+          const isPromoted = item.promotedPrice !== null && item.promotedPrice < item.price;
+          const discountPercentage = isPromoted ? Math.round(((item.price - item.promotedPrice) / item.price) * 100) : 0;
 
           return (
             <Animated.View style={[styles.productCard, { opacity: fadeAnim }]}>
+              {isPromoted && (
+                <Animated.View
+                  style={[
+                    styles.promoBadge,
+                    { opacity: fadeAnim },
+                  ]}
+                >
+                  <Text style={styles.promoText}>{`-${discountPercentage}%`}</Text>
+                </Animated.View>
+              )}
               <View style={styles.productImageContainer}>
                 {imageSource ? (
                   <Image source={imageSource} style={styles.productImage} resizeMode="contain" />
@@ -218,11 +229,27 @@ export default function CatalogueScreen({ navigation }) {
               </View>
               <View style={styles.productInfo}>
                 <Text style={styles.productName}>{item.name}</Text>
-                <Text style={styles.productPrice}>{item.price} FCFA</Text>
+                <View style={styles.priceContainer}>
+                  {isPromoted ? (
+                    <>
+                      <Text style={styles.promotedPrice}>{item.promotedPrice} FCFA</Text>
+                      <Text style={styles.originalPrice}>{item.price} FCFA</Text>
+                    </>
+                  ) : (
+                    <Text style={styles.productPrice}>{item.price} FCFA</Text>
+                  )}
+                </View>
                 <Text style={styles.productWeight}>{item.weight} kg</Text>
                 <View style={[styles.stockIndicator, { backgroundColor: stockColor }]} />
               </View>
-              <TouchableOpacity style={styles.addButton} onPress={() => addToCartHandler(item)}>
+              <TouchableOpacity
+                style={[
+                  styles.addButton,
+                  !state.supermarketStatus?.isOpen && styles.disabledButton,
+                ]}
+                onPress={() => addToCartHandler(item)}
+                disabled={!state.supermarketStatus?.isOpen}
+              >
                 <Ionicons name="cart-outline" size={24} color="#fff" />
               </TouchableOpacity>
             </Animated.View>
@@ -231,14 +258,11 @@ export default function CatalogueScreen({ navigation }) {
           return null;
       }
     },
-    [state.selectedSupermarket, state.selectedLocationId, addToCartHandler, fadeAnim]
+    [state.selectedSupermarket, state.selectedLocationId, addToCartHandler, fadeAnim, state.supermarketStatus]
   );
 
   const renderCartIcon = useCallback(() => {
     const cartCount = cart.length;
-    console.log('État du cart dans renderCartIcon:', cart);
-    console.log('Nombre d’articles dans le panier (cartCount):', cartCount);
-
     return (
       <View
         style={styles.cartIcon}
@@ -282,7 +306,7 @@ export default function CatalogueScreen({ navigation }) {
           <Text
             style={[
               styles.categoryText,
-              state.selectedCategory === category && styles.selectedCategoryText,
+              state.selectedCategory === category ? styles.selectedCategoryText : null,
             ]}
           >
             {category}
@@ -317,15 +341,25 @@ export default function CatalogueScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.container}>
+      {state.supermarketStatus && !state.supermarketStatus.isOpen && (
+        <View style={styles.banner}>
+          <Text style={styles.bannerText}>
+            Ce site est actuellement fermé. Vous pouvez consulter le catalogue, mais les achats sont désactivés.
+            {state.supermarketStatus.status && ` Raison : ${state.supermarketStatus.status}`}
+          </Text>
+        </View>
+      )}
       <View style={styles.header}>
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => {
-            if (state.currentStep === 'locations' || state.currentStep === 'products') {
-              fetchLocations(state.selectedSupermarket);
-            } else {
-              setState((prev) => ({ ...prev, currentStep: 'supermarkets' }));
-            }
-          }}>
+          <TouchableOpacity
+            onPress={() => {
+              if (state.currentStep === 'locations' || state.currentStep === 'products') {
+                fetchLocations(state.selectedSupermarket);
+              } else {
+                setState((prev) => ({ ...prev, currentStep: 'supermarkets' }));
+              }
+            }}
+          >
             <Text style={styles.backButton}>Site</Text>
           </TouchableOpacity>
           <Text style={styles.title}>Catalogue</Text>
@@ -382,6 +416,16 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  banner: {
+    backgroundColor: '#ff4444',
+    padding: 10,
+    alignItems: 'center',
+  },
+  bannerText: {
+    color: '#fff',
+    fontSize: 14,
+    textAlign: 'center',
   },
   header: {
     padding: 10,
@@ -505,22 +549,22 @@ const styles = StyleSheet.create({
     maxWidth: '48%',
   },
   productImageContainer: {
-    aspectRatio: 3 / 2,
+    aspectRatio: 1,
     width: '100%',
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
-    borderBottomWidth: 1,
-    borderBottomColor: '#ddd',
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
   },
   productImage: {
     width: '100%',
-    height: 100,
-    resizeMode: 'cover',
+    height: '100%',
+    resizeMode: 'contain',
   },
   placeholderImage: {
-    width: 150,
-    height: 100,
+    width: '100%',
+    height: '100%',
     backgroundColor: '#ccc',
     justifyContent: 'center',
     alignItems: 'center',
@@ -537,10 +581,25 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
   },
+  priceContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
   productPrice: {
     fontSize: 14,
     color: '#666',
-    marginTop: 4,
+  },
+  promotedPrice: {
+    fontSize: 16,
+    color: '#28a745',
+    fontWeight: 'bold',
+    marginRight: 8,
+  },
+  originalPrice: {
+    fontSize: 14,
+    color: '#999',
+    textDecorationLine: 'line-through',
   },
   productWeight: {
     fontSize: 12,
@@ -561,6 +620,33 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     margin: 10,
+  },
+  disabledButton: {
+    backgroundColor: '#ccc',
+    opacity: 0.5,
+  },
+  promoBadge: {
+    position: 'absolute',
+    top: 5,
+    left: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 5,
+    backgroundColor: '#28a745',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#fff',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+  },
+  promoText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   loadingContainer: {
     flex: 1,

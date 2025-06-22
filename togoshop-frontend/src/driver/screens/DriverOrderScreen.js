@@ -11,7 +11,7 @@ import {
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { getDriverOrders, acceptOrder, rejectOrder, updateDriverOrderStatus, reportDeliveryIssue } from '../../shared/services/api';
 
-export default function DriverOrderScreen() {
+export default function DriverOrderScreen({ navigation }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [currentLocation] = useState({ lat: 6.1700, lng: 1.2300 }); // Position simulée (ex. Lomé)
@@ -33,7 +33,7 @@ export default function DriverOrderScreen() {
     try {
       const response = await getDriverOrders();
       console.log('Données reçues par fetchOrders:', response);
-      // Filtrer pour exclure les commandes livrées
+      // Exclure explicitement les commandes delivered
       const filteredOrders = (response || []).filter(order => order.status !== 'delivered');
       setOrders(filteredOrders);
     } catch (error) {
@@ -73,14 +73,8 @@ export default function DriverOrderScreen() {
     }
   };
 
-  const markAsDelivered = async (orderId) => {
-    try {
-      await updateDriverOrderStatus(orderId, 'delivered');
-      Alert.alert('Succès', 'Commande marquée comme livrée');
-      fetchOrders();
-    } catch (error) {
-      Alert.alert('Erreur', 'Impossible de mettre à jour le statut');
-    }
+  const markAsDelivered = (orderId) => {
+    navigation.navigate('DriverValidation', { orderId });
   };
 
   const reportDeliveryIssueHandler = async (orderId, issueDetails) => {
@@ -202,12 +196,8 @@ export default function DriverOrderScreen() {
       ? `Récupération : ${item.supermarketId?.name || 'Supermarché Inconnu'} (${supermarketAddress}, ~${distance} km, ${direction})`
       : `Récupération : ${item.supermarketId?.name || 'Supermarché Inconnu'} (${supermarketAddress})`;
 
-    // Highlight si autre commande existe après 'delivered'
-    const isNextOrder = item.status === 'delivered' && orders.some(o => o.status !== 'delivered');
-    const cardStyle = isNextOrder ? [styles.orderCard, styles.highlightCard] : styles.orderCard;
-
     return (
-      <View style={cardStyle}>
+      <View style={styles.orderCard}>
         {/* En-tête avec ID et statut */}
         <View style={styles.orderHeader}>
           <Text style={styles.orderId}># {item._id.substring(0, 8)}...</Text>
@@ -217,159 +207,89 @@ export default function DriverOrderScreen() {
           </View>
         </View>
 
-        {/* Affichage spécifique selon le statut */}
-        {item.status === 'validated' ? (
-          <>
-            {/* Informations pour validated */}
-            <View style={styles.orderDetails}>
-              <Text style={styles.orderText}>
-                <Icon name="map-marker" size={16} color="#4B5563" /> 
-                {item.deliveryAddress?.address || 'Adresse non définie'} 
-                {item.deliveryAddress?.instructions ? ` (${item.deliveryAddress.instructions})` : ''}
-              </Text>
-              <Text style={styles.orderText}>
-                <Icon name="cash" size={16} color="#4B5563" /> Paiement: {item.paymentMethod || 'Non défini'}
-              </Text>
-              <Text style={styles.orderText}>
-                <Icon name="truck" size={16} color="#4B5563" /> Frais: {item.deliveryFee} FCFA
-              </Text>
-              <Text style={styles.orderText}>
-                <Icon name="account" size={16} color="#4B5563" /> {item.clientId?.name || item.clientId?.email || 'Client Inconnu'}
-              </Text>
-              <Text style={styles.orderText}>
-                <Icon name="store" size={16} color="#4B5563" /> 
-                {item.supermarketId?.name || 'Supermarché Inconnu'} ({supermarketAddress})
-              </Text>
-            </View>
+        {/* Informations pour tous les statuts */}
+        <View style={styles.orderDetails}>
+          <Text style={styles.orderText}>
+            <Icon name="map-marker" size={16} color="#4B5563" /> 
+            {item.deliveryAddress?.address || 'Adresse non définie'} 
+            {item.deliveryAddress?.instructions ? ` (${item.deliveryAddress.instructions})` : ''}
+          </Text>
+          <Text style={styles.orderText}>
+            <Icon name="cash" size={16} color="#4B5563" /> Paiement: {item.paymentMethod || 'Non défini'}
+          </Text>
+          <Text style={styles.orderText}>
+            <Icon name="truck" size={16} color="#4B5563" /> Frais: {item.deliveryFee} FCFA
+          </Text>
+          <Text style={styles.orderText}>
+            <Icon name="account" size={16} color="#4B5563" /> {item.clientId?.name || item.clientId?.email || 'Client Inconnu'}
+          </Text>
+          <Text style={styles.orderText}>
+            <Icon name="store" size={16} color="#4B5563" /> {retrievalText}
+          </Text>
+          {estimatedTime && <Text style={styles.orderText}>{estimatedTime}</Text>}
+        </View>
 
-            {/* Actions pour validated */}
-            <View style={styles.actionContainer}>
-              <View style={styles.actionRow}>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.acceptButton]}
-                  onPress={() => acceptOrderHandler(item._id)}
-                >
-                  <Icon name="check" size={16} color="#fff" style={styles.buttonIcon} />
-                  <Text style={styles.buttonText}>Accepter</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.rejectButton]}
-                  onPress={() => rejectOrderHandler(item._id)}
-                >
-                  <Icon name="close" size={16} color="#fff" style={styles.buttonIcon} />
-                  <Text style={styles.buttonText}>Rejeter</Text>
-                </TouchableOpacity>
-              </View>
+        {/* Actions selon le statut */}
+        <View style={styles.actionContainer}>
+          {item.status === 'validated' && (
+            <View style={styles.actionRow}>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.acceptButton]}
+                onPress={() => acceptOrderHandler(item._id)}
+              >
+                <Icon name="check" size={16} color="#fff" style={styles.buttonIcon} />
+                <Text style={styles.buttonText}>Accepter</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.rejectButton]}
+                onPress={() => rejectOrderHandler(item._id)}
+              >
+                <Icon name="close" size={16} color="#fff" style={styles.buttonIcon} />
+                <Text style={styles.buttonText}>Rejeter</Text>
+              </TouchableOpacity>
             </View>
-          </>
-        ) : (
-          <>
-            {/* Informations pour les autres statuts */}
-            <View style={styles.orderDetails}>
-              <Text style={styles.orderText}>
-                <Icon name="map-marker" size={16} color="#4B5563" /> 
-                {item.deliveryAddress?.address || 'Adresse non définie'} 
-                {item.deliveryAddress?.instructions ? ` (${item.deliveryAddress.instructions})` : ''}
-              </Text>
-              <Text style={styles.orderText}>
-                <Icon name="cash" size={16} color="#4B5563" /> Paiement: {item.paymentMethod || 'Non défini'}
-              </Text>
-              <Text style={styles.orderText}>
-                <Icon name="truck" size={16} color="#4B5563" /> Frais: {item.deliveryFee} FCFA
-              </Text>
-              <Text style={styles.orderText}>
-                <Icon name="account" size={16} color="#4B5563" /> {item.clientId?.name || item.clientId?.email || 'Client Inconnu'}
-              </Text>
-              <Text style={styles.orderText}>
-                <Icon name="store" size={16} color="#4B5563" /> {retrievalText}
-              </Text>
-              {estimatedTime && <Text style={styles.orderText}>{estimatedTime}</Text>}
-              {item.status === 'delivered' && (
-                <Text style={styles.orderText}>
-                  <Icon name="lock" size={16} color="#4B5563" /> Code: {item.validationCode}
-                </Text>
-              )}
-              {item.status === 'delivered' && isNextOrder && (
-                <Text style={styles.nextOrderText}>Prochaine commande disponible ! ({orders.length - 1} restantes)</Text>
-              )}
+          )}
+          {item.status === 'ready_for_pickup' && (
+            <TouchableOpacity
+              style={[styles.actionButton, styles.inDeliveryButton]}
+              onPress={() => markAsInDelivery(item._id)}
+            >
+              <Icon name="truck-delivery" size={16} color="#fff" style={styles.buttonIcon} />
+              <Text style={styles.buttonText}>Marquer comme En Livraison</Text>
+            </TouchableOpacity>
+          )}
+          {item.status === 'in_delivery' && (
+            <View style={styles.actionRow}>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.deliveredButton]}
+                onPress={() => markAsDelivered(item._id)}
+              >
+                <Icon name="check-circle" size={16} color="#fff" style={styles.buttonIcon} />
+                <Text style={styles.buttonText}>Valider la Livraison</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.actionButton, styles.reportButton]}
+                onPress={() =>
+                  Alert.prompt(
+                    'Signaler un Problème',
+                    'Décrivez le problème',
+                    [
+                      { text: 'Annuler', style: 'cancel' },
+                      {
+                        text: 'Envoyer',
+                        onPress: (issueDetails) => reportDeliveryIssueHandler(item._id, issueDetails || 'Problème non spécifié'),
+                      },
+                    ],
+                    'plain-text'
+                  )
+                }
+              >
+                <Icon name="alert-circle" size={16} color="#fff" style={styles.buttonIcon} />
+                <Text style={styles.buttonText}>Signaler</Text>
+              </TouchableOpacity>
             </View>
-
-            {/* Actions pour les autres statuts */}
-            <View style={styles.actionContainer}>
-              {item.status === 'ready_for_pickup' && (
-                <TouchableOpacity
-                  style={[styles.actionButton, styles.inDeliveryButton]}
-                  onPress={() => markAsInDelivery(item._id)}
-                >
-                  <Icon name="truck-delivery" size={16} color="#fff" style={styles.buttonIcon} />
-                  <Text style={styles.buttonText}>Marquer comme Prête</Text>
-                </TouchableOpacity>
-              )}
-              {item.status === 'in_delivery' && (
-                <View style={styles.actionRow}>
-                  <TouchableOpacity
-                    style={[styles.actionButton, styles.deliveredButton]}
-                    onPress={() => markAsDelivered(item._id)}
-                  >
-                    <Icon name="check-circle" size={16} color="#fff" style={styles.buttonIcon} />
-                    <Text style={styles.buttonText}>Marquer comme Livré</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.actionButton, styles.reportButton]}
-                    onPress={() =>
-                      Alert.prompt(
-                        'Signaler un Problème',
-                        'Décrivez le problème',
-                        [
-                          { text: 'Annuler', style: 'cancel' },
-                          {
-                            text: 'Envoyer',
-                            onPress: (issueDetails) => reportDeliveryIssueHandler(item._id, issueDetails || 'Problème non spécifié'),
-                          },
-                        ],
-                        'plain-text'
-                      )
-                    }
-                  >
-                    <Icon name="alert-circle" size={16} color="#fff" style={styles.buttonIcon} />
-                    <Text style={styles.buttonText}>Signaler</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-              {item.status === 'delivered' && isNextOrder && (
-                <View style={styles.actionRow}>
-                  <TouchableOpacity
-                    style={[styles.actionButton, styles.deliveredButton]}
-                    onPress={() => markAsDelivered(item._id)}
-                  >
-                    <Icon name="check-circle" size={16} color="#fff" style={styles.buttonIcon} />
-                    <Text style={styles.buttonText}>Marquer comme Livré</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.actionButton, styles.reportButton]}
-                    onPress={() =>
-                      Alert.prompt(
-                        'Signaler un Problème',
-                        'Décrivez le problème',
-                        [
-                          { text: 'Annuler', style: 'cancel' },
-                          {
-                            text: 'Envoyer',
-                            onPress: (issueDetails) => reportDeliveryIssueHandler(item._id, issueDetails || 'Problème non spécifié'),
-                          },
-                        ],
-                        'plain-text'
-                      )
-                    }
-                  >
-                    <Icon name="alert-circle" size={16} color="#fff" style={styles.buttonIcon} />
-                    <Text style={styles.buttonText}>Signaler</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          </>
-        )}
+          )}
+        </View>
       </View>
     );
   };
@@ -436,10 +356,6 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  highlightCard: {
-    borderWidth: 2,
-    borderColor: '#FCD34D',
-  },
   orderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -476,12 +392,6 @@ const styles = StyleSheet.create({
     color: '#4B5563',
     marginBottom: 8,
     fontFamily: 'Poppins-Regular',
-  },
-  nextOrderText: {
-    fontSize: 12,
-    color: '#FCD34D',
-    fontFamily: 'Poppins-Medium',
-    marginTop: 8,
   },
   actionContainer: {
     marginTop: 12,

@@ -6,6 +6,7 @@ import DashboardScreen from '../screens/DashboardScreen';
 import OrderScreen from '../screens/OrderScreen';
 import ProductScreen from '../screens/ProductScreen';
 import StockScreen from '../screens/StockScreen';
+import PromotionScreen from '../screens/PromotionScreen';
 import OrderHistoryScreen from '../screens/OrderHistoryScreen';
 
 const Stack = createStackNavigator();
@@ -19,6 +20,7 @@ export default function ManagerNavigator() {
       <Stack.Screen name="Orders" component={OrderScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Products" component={ProductScreen} options={{ headerShown: false }} />
       <Stack.Screen name="Stock" component={StockScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Promotion" component={PromotionScreen} options={{ headerShown: false }} />
       <Stack.Screen name="OrderHistory" component={OrderHistoryScreen} options={{ title: 'Historique des Commandes', headerShown: false }} />
     </Stack.Navigator>
   );

@@ -5,6 +5,7 @@ import DriverLoginScreen from '../screens/DriverLoginScreen';
 import DriverDashboardScreen from '../screens/DriverDashboardScreen';
 import DriverOrderScreen from '../screens/DriverOrderScreen';
 import DriverEarningScreen from '../screens/DriverEarningScreen';
+import DriverValidationScreen from '../screens/DriverValidationScreen';
 
 const Stack = createStackNavigator();
 
@@ -35,6 +36,11 @@ export default function DriverNavigator() {
         name="DriverEarnings"
         component={DriverEarningScreen}
         options={{ title: 'Mes Gains' }}
+      />
+      <Stack.Screen
+        name="DriverValidation"
+        component={DriverValidationScreen}
+        options={{ title: 'Valider la Livraison' }}
       />
     </Stack.Navigator>
   );

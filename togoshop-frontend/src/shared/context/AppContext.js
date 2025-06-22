@@ -1,7 +1,7 @@
 import React, { createContext, useState, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
-import { getPromotions, getUserCart, addToCartAPI } from '../services/api';
+import { apiRequest, getPromotions, getUserCart, addToCartAPI, getManagerInfo } from '../services/api';
 
 export const AppContext = createContext();
 
@@ -34,6 +34,8 @@ export const AppProvider = ({ children }) => {
             console.log('Erreur dans loadAuth:', error.message);
           }
         }
+      } else if (token) {
+        await refreshData();
       } else {
         console.log('Aucun token ou utilisateur trouvé dans AsyncStorage');
       }
@@ -43,11 +45,11 @@ export const AppProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    if (user && user.role === 'client') { // Condition sur le rôle
+    if (user && user.role === 'client') {
       fetchCart();
     } else if (user) {
       console.log('fetchCart ignoré pour le rôle:', user.role);
-      setCart([]); // Réinitialiser le panier pour les non-clients
+      setCart([]);
       setLoadingCart(false);
     }
   }, [user]);
@@ -81,35 +83,34 @@ export const AppProvider = ({ children }) => {
       }
 
       const response = await getUserCart();
-      console.log('Réponse getUserCart dans fetchCart:', response);
+      console.log('Réponse getUserCart dans fetchCart:', JSON.stringify(response, null, 2));
 
       let products = [];
-      if (response && response.order && Array.isArray(response.order.products)) {
-        products = response.order.products;
-      } else if (response && Array.isArray(response.products)) {
+      if (response && response.products && Array.isArray(response.products)) {
         products = response.products;
-      }
-
-      if (products.length > 0) {
-        const mappedCart = products.map(item => ({
-          productId: item.productId._id || item.productId,
-          name: item.productId.name || 'Produit inconnu',
-          price: item.productId.price || 0,
-          weight: item.productId.weight || 1,
-          quantity: item.quantity || 1,
-          comment: item.comment || '',
-          photoUrl: item.photoUrl || '',
-        }));
-        console.log('Cart après mapping:', mappedCart);
-        setCart(mappedCart);
-        console.log('Cart mis à jour dans l\'état:', mappedCart);
-        setError(null);
-        return { orderId: response._id, cart: mappedCart };
       } else {
         console.log('Aucun produit dans le panier ou réponse invalide:', response);
         setCart([]);
         return { orderId: null, cart: [] };
       }
+
+      const mappedCart = products.map(item => ({
+        productId: item.productId || '',
+        name: item.name || 'Produit inconnu',
+        price: Number(item.price) || 0,
+        weight: Number(item.weight) || 0,
+        quantity: Number(item.quantity) || 1,
+        comment: item.comment || '',
+        alternativeLocationId: item.alternativeLocationId || '',
+        stockByLocation: item.stockByLocation || [],
+        promotedPrice: item.promotedPrice !== null && !isNaN(item.promotedPrice) ? Number(item.promotedPrice) : null,
+      }));
+
+      console.log('Cart normalisé:', JSON.stringify(mappedCart, null, 2));
+      setCart(mappedCart);
+      console.log('Cart mis à jour dans l\'état:', JSON.stringify(mappedCart, null, 2));
+      setError(null);
+      return { orderId: response.orderId, cart: mappedCart };
     } catch (error) {
       console.error('Erreur détaillée lors du chargement du panier:', error.message);
       if (error.message === 'jwt expired') {
@@ -129,6 +130,28 @@ export const AppProvider = ({ children }) => {
     }
   }, [user]);
 
+  const refreshData = useCallback(async () => {
+    console.log('Appel de refreshData');
+    const token = await AsyncStorage.getItem('token');
+    if (token) {
+      try {
+        const userData = await getManagerInfo();
+        await AsyncStorage.setItem('user', JSON.stringify(userData));
+        setUser(userData);
+        console.log('User mis à jour dans refreshData:', userData);
+      } catch (error) {
+        console.error('Erreur dans refreshData:', error.message);
+        if (error.message === 'jwt expired') {
+          await AsyncStorage.removeItem('token');
+          await AsyncStorage.removeItem('user');
+          setUser(null);
+          setCart([]);
+        }
+        setError(error.message);
+      }
+    }
+  }, []);
+
   const refreshCart = useCallback(async () => {
     console.log('Appel de refreshCart');
     const result = await fetchCart();
@@ -143,7 +166,7 @@ export const AppProvider = ({ children }) => {
   const addToCart = async (product) => {
     if (!user || !product._id || !product.supermarketId || !product.locationId) {
       const errorMessage = 'Impossible d’ajouter le produit : utilisateur ou données manquantes.';
-      console.error(errorMessage, { user, product });
+      console.log(errorMessage, { user, product });
       setError(errorMessage);
       Alert.alert('Erreur', errorMessage);
       return { success: false, error: errorMessage };
@@ -154,6 +177,7 @@ export const AppProvider = ({ children }) => {
       quantity: 1,
       locationId: product.locationId,
       supermarketId: product.supermarketId,
+      promotedPrice: product.promotedPrice || null,
     };
     try {
       console.log('Ajout au panier, cartItem envoyé:', cartItem);
@@ -205,10 +229,11 @@ export const AppProvider = ({ children }) => {
         user,
         setUser,
         promotions,
-        setPromotions, 
+        setPromotions,
         loadingCart,
         error,
         fetchCart,
+        refreshData,
         refreshCart,
         updateLocalCart,
       }}

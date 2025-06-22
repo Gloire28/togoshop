@@ -49,9 +49,9 @@ export default function PaymentScreen({ route, navigation }) {
   const { orderId } = route.params || {};
   const [order, setOrder] = useState(null);
   const [supermarketLocation, setSupermarketLocation] = useState({ lat: 0, lng: 0 });
-  const [paymentMethod, setPaymentMethod] = useState('cash'); // Pré-sélectionne 'cash' par défaut
+  const [paymentMethod, setPaymentMethod] = useState('cash');
   const [deliveryType, setDeliveryType] = useState('standard');
-  const [clientPhone, setClientPhone] = useState(''); // Ajout pour Flooz/TMoney
+  const [clientPhone, setClientPhone] = useState('');
 
   useEffect(() => {
     if (!orderId) {
@@ -65,15 +65,32 @@ export default function PaymentScreen({ route, navigation }) {
     const fetchOrderAndSupermarket = async () => {
       try {
         const orderResponse = await apiRequest(`/orders/${orderId}`);
-        console.log('Réponse complète de /orders/:id :', orderResponse);
+        console.log('Réponse complète de /orders/:id :', JSON.stringify(orderResponse, null, 2));
         if (!orderResponse.order) {
           throw new Error('Commande non trouvée dans la réponse');
         }
-        setOrder(orderResponse.order);
-        console.log('Order chargé après setOrder:', orderResponse.order);
 
-        const supermarketId = orderResponse.order?.supermarketId?._id;
-        const locationId = orderResponse.order?.locationId;
+        // Normaliser les produits pour un accès direct
+        const normalizedOrder = {
+          ...orderResponse.order,
+          products: orderResponse.order.products.map(item => ({
+            productId: item.productId?._id || item.productId,
+            name: item.productId?.name || item.name || 'Produit inconnu',
+            price: Number(item.productId?.price || item.price || 0),
+            promotedPrice: item.promotedPrice !== null && !isNaN(item.promotedPrice) ? Number(item.promotedPrice) : null,
+            quantity: Number(item.quantity || 1),
+            comment: item.comment || '',
+            alternativeLocationId: item.alternativeLocationId || '',
+            stockByLocation: item.stockByLocation || item.productId?.stockByLocation || [],
+            weight: Number(item.weight || item.productId?.weight || 0),
+          })),
+        };
+
+        setOrder(normalizedOrder);
+        console.log('Order normalisé après setOrder:', JSON.stringify(normalizedOrder, null, 2));
+
+        const supermarketId = normalizedOrder.supermarketId?._id || normalizedOrder.supermarketId;
+        const locationId = normalizedOrder.locationId;
 
         if (!supermarketId) {
           throw new Error('ID du supermarché non trouvé dans la commande');
@@ -97,24 +114,16 @@ export default function PaymentScreen({ route, navigation }) {
     if (orderId) fetchOrderAndSupermarket();
   }, [orderId]);
 
-  // Calcul des valeurs avec débogage du reduce
-  const subtotal = order?.subtotal ?? (
-    order?.products?.reduce((sum, item) => {
-      const price = item.productId?.price || 0;
-      const quantity = item.quantity || 0;
-      console.log(`Calcul reduce - item:`, item, `price: ${price}, quantity: ${quantity}, sous-total partiel: ${sum + price * quantity}`);
-      return sum + price * quantity;
-    }, 0) || 0
-  );
+  // Utiliser directement les valeurs du backend
+  const subtotal = order?.subtotal || 0;
   const deliveryFee = order?.deliveryFee || 0;
   const serviceFee = order?.serviceFee || 0;
-  const totalAmount = order?.totalAmount || (subtotal + deliveryFee + serviceFee);
+  const totalAmount = order?.totalAmount || 0;
 
-  console.log('Order au moment du calcul:', order);
-  console.log(`Valeurs calculées - Sous-total: ${subtotal}, Frais de livraison: ${deliveryFee}, Frais de service: ${serviceFee}, Total: ${totalAmount}`);
+  console.log('Valeurs affichées - Sous-total:', subtotal, 'Frais de livraison:', deliveryFee, 'Frais de service:', serviceFee, 'Total:', totalAmount);
 
   const handlePayment = async () => {
-    console.log('Mode de paiement sélectionné:', paymentMethod); // Log pour débogage
+    console.log('Mode de paiement sélectionné:', paymentMethod);
     if (!paymentMethod || paymentMethod !== 'cash') {
       Alert.alert('Erreur', 'Seul le paiement en espèces est disponible pour le moment.');
       return;
@@ -176,35 +185,48 @@ export default function PaymentScreen({ route, navigation }) {
             <Text style={styles.tableHeaderText}>Total (FCFA)</Text>
           </View>
           {order?.products?.length > 0 ? (
-            order.products.map((item, index) => (
-              <View key={index} style={styles.tableRow}>
-                <Text style={styles.tableCell}>{item.productId?.name || 'Produit inconnu'}</Text>
-                <Text style={styles.tableCell}>{item.productId?.price || 0}</Text>
-                <Text style={styles.tableCell}>{item.quantity}</Text>
-                <Text style={styles.tableCell}>{(item.productId?.price || 0) * item.quantity}</Text>
+            <>
+              {order.products.map((item, index) => (
+                <View key={index} style={styles.tableRow}>
+                  <Text style={styles.tableCell}>{item.name || 'Produit inconnu'}</Text>
+                  <Text style={styles.tableCell}>
+                    {(item.promotedPrice !== null ? item.promotedPrice : item.price || 0).toFixed(0)}
+                  </Text>
+                  <Text style={styles.tableCell}>{item.quantity || 0}</Text>
+                  <Text style={styles.tableCell}>
+                    {((item.promotedPrice !== null ? item.promotedPrice : item.price || 0) * (item.quantity || 0)).toFixed(0)}
+                  </Text>
+                </View>
+              ))}
+              <View style={styles.tableRow}>
+                <Text style={[styles.tableCell, styles.thankYouMessage]} colSpan={4}>
+                  Merci d'avoir choisi nos services ! 🛒
+                </Text>
               </View>
-            ))
+            </>
           ) : (
-            <Text style={styles.tableCell}>Aucun produit dans cette commande</Text>
+            <View style={styles.tableRow}>
+              <Text style={styles.tableCell} colSpan={4}>Aucun produit dans cette commande</Text>
+            </View>
           )}
         </View>
 
         <View style={styles.summarySection}>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Sous-total :</Text>
-            <Text style={styles.summaryValue}>{subtotal} FCFA</Text>
+            <Text style={styles.summaryValue}>{subtotal.toFixed(0)} FCFA</Text>
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Frais de Livraison :</Text>
-            <Text style={styles.summaryValue}>{Math.round(deliveryFee)} FCFA</Text>
+            <Text style={styles.summaryValue}>{deliveryFee.toFixed(2)} FCFA</Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Frais de Service (10%) :</Text>
-            <Text style={styles.summaryValue}>{serviceFee} FCFA</Text>
+            <Text style={styles.summaryLabel}>Frais de Service :</Text>
+            <Text style={styles.summaryValue}>{serviceFee.toFixed(0)} FCFA</Text>
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabelTotal}>Montant Total :</Text>
-            <Text style={styles.summaryValueTotal}>{Math.round(totalAmount)} FCFA</Text>
+            <Text style={styles.summaryValueTotal}>{totalAmount.toFixed(0)} FCFA</Text>
           </View>
         </View>
 
@@ -214,14 +236,14 @@ export default function PaymentScreen({ route, navigation }) {
             { value: 'Flooz', label: 'Flooz', disabled: true },
             { value: 'TMoney', label: 'TMoney', disabled: true },
             { value: 'wallet', label: 'Wallet', disabled: true },
-            { value: 'cash', label: 'Espèces', disabled: false }, // Seule option disponible
+            { value: 'cash', label: 'Espèces', disabled: false },
           ].map((method) => (
             <TouchableOpacity
               key={method.value}
               style={[
                 styles.paymentCard,
                 paymentMethod === method.value && styles.selectedCard,
-                method.disabled && styles.disabledCard, // Style pour les options désactivées
+                method.disabled && styles.disabledCard,
               ]}
               onPress={() => {
                 if (!method.disabled) {
@@ -229,7 +251,7 @@ export default function PaymentScreen({ route, navigation }) {
                   console.log('Méthode sélectionnée:', method.value);
                 }
               }}
-              disabled={method.disabled} // Désactive les clics sur les options non disponibles
+              disabled={method.disabled}
             >
               <Text style={[styles.cardText, method.disabled && styles.disabledText]}>
                 {method.label}
@@ -360,7 +382,15 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#ddd',
   },
-  tableCell: { fontSize: 14, color: '#333' },
+  tableCell: { fontSize: 14, color: '#333', flex: 1, textAlign: 'center' },
+  thankYouMessage: {
+    fontStyle: 'italic',
+    color: '#28a745',
+    fontWeight: '600',
+    textAlign: 'center',
+    paddingVertical: 10,
+    fontSize: 16,
+  },
   summarySection: {
     backgroundColor: '#fff',
     borderRadius: 10,
@@ -411,13 +441,13 @@ const styles = StyleSheet.create({
     borderColor: '#2ecc71',
   },
   disabledCard: {
-    backgroundColor: '#f0f0f0', // Fond grisé
+    backgroundColor: '#f0f0f0',
     opacity: 0.6,
-    borderColor: '#ccc', // Bordure plus claire
+    borderColor: '#ccc',
   },
   disabledText: {
-    textDecorationLine: 'line-through', // Ligne barrée
-    color: '#888', // Texte grisé
+    textDecorationLine: 'line-through',
+    color: '#888',
   },
   cardText: { fontSize: 16, fontWeight: '500', color: '#333' },
   phoneInputContainer: { marginBottom: 20 },
