@@ -63,20 +63,25 @@ const permissions = [
       return order.clientId.toString() === req.user.id && ['cart_in_progress', 'pending_validation', 'awaiting_validator'].includes(order.status);
     }
   },
-  { 
-    path: '/:id/status', 
-    method: 'PUT', 
-    baseUrl: '/api/orders', 
-    roles: ['manager', 'order_validator', 'stock_manager'], 
-    additionalCheck: async (req) => {
-      const orderId = req.params.id;
-      const order = await Order.findById(orderId);
-      if (!order) return false;
-      const user = req.user;
-      return order.supermarketId.toString() === user.supermarketId && 
-             (order.assignedManager?.toString() === user.id || !order.assignedManager);
+  // Remplacez la permission existante pour /:id/status par :
+{ 
+  path: '/:id/status', 
+  method: 'PUT', 
+  baseUrl: '/api/orders', 
+  roles: ['manager', 'order_validator', 'stock_manager'], 
+  additionalCheck: async (req) => {
+    const orderId = req.params.id;
+    const order = await Order.findById(orderId);
+    if (!order) return false;
+    const user = req.user;
+    // Autoriser l'annulation si la commande est en pending_validation et appartient au supermarché
+    if (req.body.status === 'cancelled' && order.status === 'pending_validation') {
+      return order.supermarketId.toString() === user.supermarketId;
     }
-  },
+    return order.supermarketId.toString() === user.supermarketId && 
+           (order.assignedManager?.toString() === user.id || !order.assignedManager);
+  }
+},
   { path: '/:id', method: 'GET', baseUrl: '/api/products', roles: ['client', 'driver', 'manager', 'admin'] },
   { 
     path: '/supermarket/:supermarketId', 
@@ -86,6 +91,18 @@ const permissions = [
     additionalCheck: async (req) => {
       const { supermarketId } = req.params;
       return req.user.supermarketId === supermarketId;
+    }
+  },
+  { 
+    path: '/:id', 
+    method: 'DELETE', 
+    baseUrl: '/api/orders', 
+    roles: ['client'], 
+    additionalCheck: async (req) => {
+      const orderId = req.params.id;
+      const order = await Order.findById(orderId);
+      if (!order) return false;
+      return order.clientId.toString() === req.user.id;
     }
   },
   { path: '/:id', method: 'PUT', baseUrl: '/api/products', roles: ['admin', 'stock_manager'] },

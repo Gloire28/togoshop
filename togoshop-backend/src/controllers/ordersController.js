@@ -695,6 +695,25 @@ exports.updateOrderStatus = async (req, res) => {
       }
     }
 
+    // Supprimer le bloc qui utilisait order.remove()
+    if (status === 'cancelled') {
+      // Envoyer une notification d'annulation
+      await sendNotification(
+        order.clientId,
+        `Votre commande (ID: ${order._id}) a été annulée.`
+      );
+      
+      // Notifier le manager si assigné
+      if (order.assignedManager) {
+        await sendNotification(
+          order.assignedManager,
+          `La commande (ID: ${order._id}) a été annulée.`
+        );
+      }
+      
+      console.log(`Commande ${id} annulée.`);
+    }
+
     if (status === 'validated' && order.status !== 'validated') {
       for (const item of order.products) {
         console.log(`Traitement du produit ${item.productId} avec quantité ${item.quantity}`);
@@ -777,8 +796,9 @@ exports.updateOrderStatus = async (req, res) => {
       }
     }
 
+    // Mettre à jour le statut et sauvegarder
     order.status = status;
-    order.updatedAt = Date.now();
+    order.updatedAt = new Date();
     await order.save();
     console.log(`Commande sauvegardée après mise à jour:`, order);
 
@@ -798,8 +818,12 @@ exports.updateOrderStatus = async (req, res) => {
       await checkAndAssignDynamicOrders(id);
     }
 
-    await sendNotification(order.clientId, `Votre commande est maintenant ${order.status}`);
-    console.log(`Notification envoyée au client ${order.clientId} pour le statut ${order.status}`);
+    // Ne pas envoyer de notification pour les annulations ici
+    // car elles sont déjà gérées dans le bloc status === 'cancelled'
+    if (status !== 'cancelled') {
+      await sendNotification(order.clientId, `Votre commande est maintenant ${order.status}`);
+      console.log(`Notification envoyée au client ${order.clientId} pour le statut ${order.status}`);
+    }
 
     res.status(200).json({ message: 'Statut mis à jour avec succès', order });
   } catch (error) {
@@ -1215,5 +1239,43 @@ exports.validateDeliveryByDriver = async (req, res) => {
   } catch (error) {
     console.error('Erreur lors de la validation de la livraison par le livreur:', error.message);
     res.status(500).json({ success: false, message: 'Erreur serveur', error: error.message });
+  }
+};
+
+// Annuler une commande (par le client)
+exports.cancelOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log(`Annulation de la commande ${id} demandée par l'utilisateur ${req.user.id}`);
+
+    const order = await Order.findById(id);
+    if (!order) {
+      return res.status(404).json({ message: 'Commande non trouvée' });
+    }
+
+    // Vérifier que le client est bien le propriétaire de la commande
+    if (order.clientId.toString() !== req.user.id) {
+      return res.status(403).json({ message: 'Non autorisé à annuler cette commande' });
+    }
+
+    // Vérifier que la commande est dans un statut annulable
+    if (!['awaiting_validator', 'pending_validation'].includes(order.status)) {
+      return res.status(400).json({ 
+        message: 'La commande ne peut être annulée que dans les statuts "en attente" ou "en validation"' 
+      });
+    }
+
+    // Mettre à jour le statut
+    order.status = 'cancelled';
+    order.updatedAt = new Date();
+    await order.save();
+
+    // Envoyer une notification
+    await sendNotification(order.clientId, `Votre commande (${order._id}) a été annulée.`);
+
+    res.status(200).json({ message: 'Commande annulée avec succès', order });
+  } catch (error) {
+    console.error('Erreur lors de l\'annulation de la commande:', error.message);
+    res.status(500).json({ message: 'Erreur lors de l\'annulation', error: error.message });
   }
 };

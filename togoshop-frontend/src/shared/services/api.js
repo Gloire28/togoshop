@@ -304,3 +304,14 @@ export const registerUser = (userData) => {
   }
   return apiRequest('/users/register', { method: 'POST', body: userData });
 };
+// Annuler une commande
+export const cancelOrder = async (orderId) => {
+  try {
+    const response = await apiRequest(`/orders/${orderId}`, {
+      method: 'DELETE',
+    });
+    return response;
+  } catch (error) {
+    throw error;
+  }
+};

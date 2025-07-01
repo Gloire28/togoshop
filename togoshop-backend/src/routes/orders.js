@@ -30,11 +30,21 @@ router.put('/:id/submit', auth, (req, res, next) => {
   console.log(`Route spécifique /:id/submit appelée avec id: ${req.params.id}`);
   next();
 }, ordersController.submitOrder);
-router.put('/:id/status', auth, ordersController.updateOrderStatus);
+
+router.put('/:id/status', auth, (req, res, next) => {
+  console.log(`Route spécifique /:id/status appelée avec id: ${req.params.id} et statut demandé: ${req.body.status}`);
+  next();
+}, ordersController.updateOrderStatus);
 
 // Routes dynamiques génériques (/:id)
 router.get('/:id', auth, ordersController.getOrderById);
 router.put('/:id', auth, ordersController.updateOrder);
+
+// Nouvelle route pour l'annulation des commandes
+router.delete('/:id', auth, (req, res, next) => {
+  console.log(`Route d'annulation appelée pour: ${req.params.id}`);
+  next();
+}, ordersController.cancelOrder);
 
 // Route de débogage
 router.get('/debug/product/:id', auth, async (req, res) => {
