@@ -16,10 +16,23 @@ const { roundToTwoDecimals } = require('./numberUtils');
  */
 const validateStock = async (products, supermarketId, locationId, deliveryType, deliveryAddress) => {
   try {
+    if (!products || products.length === 0 || !locationId) {
+      return {
+        stockIssues: [],
+        updatedProducts: [],
+        subtotal: 0,
+        totalWeight: 0,
+        deliveryFee: 0,
+        additionalFees: 0,
+        serviceFee: 0,
+        totalAmount: 0,
+      };
+    }
     // Validation des paramètres d'entrée
-    if (!products || !Array.isArray(products)) throw new Error('Liste de produits invalide');
+    if (!Array.isArray(products)) throw new Error('Liste de produits invalide');
     if (!mongoose.Types.ObjectId.isValid(supermarketId)) throw new Error('ID de supermarché invalide');
-    if (!mongoose.Types.ObjectId.isValid(locationId)) throw new Error('ID de localisation invalide');
+    if (!locationId || typeof locationId !== 'string' || locationId.trim() === '') 
+      throw new Error('ID de localisation invalide')
 
     const stockIssues = [];
     const updatedProducts = [];
@@ -109,7 +122,7 @@ const validateProductItem = (item) => {
  * Traite un item produit
  */
 const processProductItem = async (item, product, location, supermarket, activePromotions) => {
-  let stockLocationId = location._id.toString();
+  let stockLocationId = String(location._id);
   let itemAdditionalFee = 0;
 
   // Gestion des emplacements alternatifs
@@ -169,7 +182,7 @@ const createStockIssue = async (item, product, location, supermarket) => {
   }).limit(3).lean();
 
   const otherLocations = product.stockByLocation.filter(loc => 
-    loc.locationId !== location._id.toString() && loc.stock >= item.quantity
+    loc.locationId !== String(location._id) && loc.stock >= item.quantity
   );
 
   const alternativeSites = otherLocations.map(loc => {

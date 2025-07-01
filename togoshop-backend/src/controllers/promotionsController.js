@@ -217,7 +217,7 @@ exports.getActivePromotions = async (req, res) => {
       $expr: { $lt: ['$currentUses', '$maxUses'] },
       isActive: true,
     })
-      .populate('productId', 'name price')
+      .populate('productId', 'name price imageUrl')
       .limit(100); // Pagination basique
 
     res.status(200).json(promotions);
@@ -243,8 +243,8 @@ exports.getPromotionsBySupermarket = async (req, res) => {
       $expr: { $lt: ['$currentUses', '$maxUses'] },
       isActive: true,
     })
-      .populate('productId', 'name price')
-      .limit(100); // Pagination basique
+      .populate('productId', 'name price imageUrl')
+      .limit(100); 
 
     res.status(200).json(promotions);
   } catch (error) {

@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BASE_URL = 'http://192.168.1.64:5000/api';
+const BASE_URL = 'http://192.168.1.75:5000/api';
 
 export const apiRequest = async (endpoint, options = {}) => {
   const { method = 'GET', body = null, isFormData = false } = options;
@@ -10,7 +10,8 @@ export const apiRequest = async (endpoint, options = {}) => {
     console.log('Token envoyé dans la requête:', token);
     console.log('Requête envoyée:', `${BASE_URL}${endpoint}`, { method, headers: { 'Content-Type': isFormData ? 'multipart/form-data' : 'application/json', ...(token && { Authorization: `Bearer ${token}` }) } });
 
-    if (!token && !isFormData && endpoint !== '/auth/login' && endpoint !== '/drivers/login') {
+    // Exclure les endpoints qui ne nécessitent pas de token
+    if (!token && !isFormData && endpoint !== '/auth/login' && endpoint !== '/drivers/login' && endpoint !== '/users/register') {
       throw new Error('Aucun token trouvé dans AsyncStorage');
     }
 
@@ -41,7 +42,31 @@ export const apiRequest = async (endpoint, options = {}) => {
     console.log('Données parsées de l\'API:', data);
     return data;
   } catch (error) {
+    if (error.message.includes('Network request failed')) {
+      throw new Error('Problème de connexion, vérifiez votre réseau.');
+    }
     throw error;
+  }
+};
+
+// Uploader une image pour un produit
+export const uploadProductImage = async (image) => {
+  const formData = new FormData();
+  formData.append('image', {
+    uri: image.uri,
+    type: image.mimeType || 'image/jpeg',
+    name: image.fileName || `product_image_${Date.now()}.jpg`,
+  });
+
+  try {
+    const response = await apiRequest('/products/upload-image', {
+      method: 'POST',
+      body: formData,
+      isFormData: true,
+    });
+    return response;
+  } catch (error) {
+    throw new Error(`Échec de l'upload de l'image : ${error.message}`);
   }
 };
 
@@ -59,13 +84,16 @@ export const getProducts = async (supermarketId, locationId) => {
   if (!supermarketId || !locationId) throw new Error('Paramètres manquants');
   try {
     const productsData = await apiRequest(`/products/supermarket/${supermarketId}?locationId=${locationId}`, { method: 'GET' });
-    const products = productsData.data || productsData; // Adapter selon la structure de la réponse API
+    const products = productsData.data || productsData; 
 
-    // Pas d'enrichissement artificiel, juste retour des données brutes
-    const enrichedProducts = products.map(product => product); // Identité pour l'instant
+    // Ajout de validation pour imageUrl avec meilleure gestion des erreurs
+    const enrichedProducts = products.map(product => ({
+      ...product,
+      imageUrl: product.imageUrl ? product.imageUrl : 'https://via.placeholder.com/150', // Fallback image
+    }));
 
     console.log('Produits récupérés avec promotedPrice:', enrichedProducts);
-    return enrichedProducts; // Retourner directement le tableau
+    return enrichedProducts; 
   } catch (error) {
     throw error;
   }
@@ -78,7 +106,17 @@ export const getPromotions = () => apiRequest('/promotions', { method: 'GET' });
 export const createOrder = (orderData) => apiRequest('/orders', { method: 'POST', body: orderData });
 
 // Récupérer le panier de l’utilisateur
-export const getUserCart = () => apiRequest('/orders/user/cart', { method: 'GET' });
+export const getUserCart = () => {
+  return apiRequest('/orders/user/cart', { method: 'GET' }).then(response => {
+    if (response && response.products) {
+      const hasImageUrl = response.products.every(product => product.productId?.imageUrl);
+      if (!hasImageUrl) {
+        console.warn('Attention : Certains produits manquent d\'imageUrl dans getUserCart');
+      }
+    }
+    return response;
+  });
+};
 
 // Mettre à jour une commande existante
 export const updateOrder = (orderId, orderData) => {
@@ -96,7 +134,11 @@ export const updateOrderStatus = (orderId, status) => {
 export const uploadPhoto = (orderId, formData) => apiRequest(`/orders/${orderId}/upload-photo`, { method: 'POST', body: formData, isFormData: true });
 
 // Connexion utilisateur
-export const login = (credentials) => apiRequest('/auth/login', { method: 'POST', body: credentials });
+export const login = (credentials) => {
+  const { name, phone } = credentials;
+  if (!name || !phone) throw new Error('Nom et numéro de téléphone sont requis');
+  return apiRequest('/auth/login', { method: 'POST', body: { name, phone } });
+};
 
 // Ajouter un produit au panier
 export const addToCartAPI = (cartItem) => {
@@ -106,7 +148,7 @@ export const addToCartAPI = (cartItem) => {
   const body = { products: [cartItem] };
   return apiRequest('/orders/user/cart', { method: 'POST', body });
 };
-
+     
 // Appliquer un code promo à une commande
 export const applyPromotion = (promoCode, orderId) => apiRequest('/promotions/apply', { method: 'POST', body: { code: promoCode, orderId } });
 
@@ -126,7 +168,10 @@ export const getManagerInfo = () => apiRequest('/managers/me', { method: 'GET' }
 export const getManagerOrders = () => apiRequest('/orders/manager', { method: 'GET' });
 
 // Connexion d’un livreur
-export const loginDriver = (credentials) => apiRequest('/drivers/login', { method: 'POST', body: credentials });
+export const loginDriver = (credentials) => {
+  const { name, phoneNumber } = credentials;
+  return apiRequest('/drivers/login', { method: 'POST', body: { name, phoneNumber } });
+};
 
 // Récupérer les informations du livreur connecté
 export const getDriverInfo = () => apiRequest('/drivers/me', { method: 'GET' });
@@ -162,12 +207,13 @@ export const reportDeliveryIssue = (orderId, issueDetails) => {
   if (!orderId || !issueDetails) throw new Error('orderId ou issueDetails manquant pour reportDeliveryIssue');
   return apiRequest('/drivers/orders/report-issue', { method: 'POST', body: { orderId, issueDetails } });
 };
-// Valider une livraison par chauffeur
 
+// Valider une livraison par chauffeur
 export const validateDeliveryByDriver = (orderId, validationCode) => {
   if (!orderId || !validationCode) throw new Error('orderId ou validationCode manquant pour validateDeliveryByDriver');
   return apiRequest(`/orders/${orderId}/validate-delivery-driver`, { method: 'POST', body: { validationCode } });
 };
+
 // Valider une livraison (côté client)
 export const validateDelivery = (orderId) => {
   if (!orderId) throw new Error('orderId manquant pour validateDelivery');
@@ -183,7 +229,9 @@ export const resendValidationCode = (orderId) => {
 // Récupérer les détails d’une commande (pour le suivi client)
 export const getOrderDetails = (orderId) => {
   if (!orderId) throw new Error('orderId manquant pour getOrderDetails');
-  return apiRequest(`/orders/${orderId}`, { method: 'GET' });
+  console.log(`Appel getOrderDetails pour orderId: ${orderId}`);
+  const timestamp = new Date().getTime(); // Ajout d'un timestamp pour éviter le cache
+  return apiRequest(`/orders/${orderId}?t=${timestamp}`, { method: 'GET' });
 };
 
 // Récupérer la position d’un livreur (pour le suivi client)
@@ -248,4 +296,11 @@ export const getPromotionLocation = (supermarketId, createdBy) => {
   if (!supermarketId) throw new Error('supermarketId manquant pour getPromotionLocation');
   if (!createdBy) throw new Error('createdBy manquant pour getPromotionLocation');
   return apiRequest(`/promotion-location?supermarketId=${supermarketId}&createdBy=${createdBy}`, { method: 'GET' });
+};
+// Inscription d'un utilisateur
+export const registerUser = (userData) => {
+  if (!userData || !userData.name || !userData.email || !userData.phone || !userData.password) {
+    throw new Error('Tous les champs (name, email, phone, password) sont requis pour registerUser');
+  }
+  return apiRequest('/users/register', { method: 'POST', body: userData });
 };

@@ -7,14 +7,20 @@ import { AppContext } from '../../shared/context/AppContext';
 
 export default function LoginScreen({ navigation }) {
   const { setUser } = useContext(AppContext);
-  const [email, setEmail] = useState('client@togoshop.com');
-  const [password, setPassword] = useState('client123');
+  const [name, setName] = useState('Gloire'); // Valeur par défaut correcte
+  const [phone, setPhone] = useState('71634248'); // Valeur par défaut correcte
 
   const handleLogin = async () => {
     try {
-      const response = await login({ email, password });
+      if (!name || !phone) {
+        Alert.alert('Erreur', 'Veuillez entrer votre nom et numéro de téléphone');
+        return;
+      }
+
+      console.log('Tentative de login avec name:', name, 'et phone:', phone); // Débogage
+      const response = await login({ name, phone });
       const { token, user } = response;
-      if (!token || !user?.id || !user?.email) throw new Error('Données invalides');
+      if (!token || !user?.id || !user?.name) throw new Error('Données invalides');
       await AsyncStorage.multiSet([['token', token], ['user', JSON.stringify(user)]]);
       setUser(user);
       navigation.reset({ index: 0, routes: [{ name: 'Main', params: { initialRouteName: 'Home' } }] });
@@ -28,12 +34,24 @@ export default function LoginScreen({ navigation }) {
     <LinearGradient colors={['#4A90E2', '#50E3C2']} style={styles.gradient}>
       <View style={styles.container}>
         <Text style={styles.title}>TogoShop</Text>
-        <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="Email" keyboardType="email-address" autoCapitalize="none" />
-        <TextInput style={styles.input} value={password} onChangeText={setPassword} placeholder="Mot de passe" secureTextEntry />
+        <TextInput
+          style={styles.input}
+          value={name}
+          onChangeText={setName}
+          placeholder="Nom"
+          autoCapitalize="words"
+        />
+        <TextInput
+          style={styles.input}
+          value={phone}
+          onChangeText={setPhone}
+          placeholder="Numéro de téléphone"
+          keyboardType="phone-pad"
+        />
         <TouchableOpacity style={styles.button} onPress={handleLogin}>
           <Text style={styles.buttonText}>Se connecter</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => Alert.alert('Info', 'Inscription à venir')}>
+        <TouchableOpacity onPress={() => navigation.navigate('Register')}>
           <Text style={styles.link}>Pas de compte ? Inscrivez-vous</Text>
         </TouchableOpacity>
       </View>

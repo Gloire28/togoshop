@@ -37,6 +37,7 @@ exports.registerManager = async (req, res) => {
     // Créer le manager avec les deux rôles
     const manager = new Manager({
       name,
+      Phone,
       email,
       password, // Le mot de passe sera haché automatiquement par le modèle
       supermarketId,

@@ -22,20 +22,6 @@ export default function HomeScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Bienvenue sur TogoShop!</Text>
-      <TouchableOpacity
-        style={styles.button}
-        onPress={() => {
-          if (orders.length > 0) {
-            console.log('Navigation vers Tracking avec orders:', orders);
-            console.log('Contexte de navigation HomeScreen:', navigation);
-            navigation.navigate('Tracking', { orders });
-          } else {
-            console.log('Aucune commande à transmettre à Tracking');
-          }
-        }}
-      >
-        <Text style={styles.buttonText}>Suivre ma commande</Text>
-      </TouchableOpacity>
     </View>
   );
 }

@@ -5,268 +5,147 @@ import {
   FlatList,
   StyleSheet,
   TouchableOpacity,
-  Alert,
   ActivityIndicator,
   SafeAreaView,
   Animated,
   TextInput,
   Vibration,
-  Image,
   ScrollView,
+  Alert
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getSupermarkets, getProducts, getSupermarketStatus } from '../../shared/services/api';
-import imageMap from '../../assets/imageMap';
+import { getProducts, getSupermarketStatus } from '../../shared/services/api';
 import { AppContext } from '../../shared/context/AppContext';
+import ProductItem from '../components/ProductItem';
 
-export default function CatalogueScreen({ navigation }) {
-  const { addToCart, cart, user, refreshData } = useContext(AppContext);
+const CatalogueScreen = ({ navigation }) => {
+  const { 
+    addToCart, 
+    cart, 
+    selectedSupermarket, 
+    selectedLocationId, 
+    setProducts, 
+    loading, 
+    setLoading, 
+    setError, 
+    error, 
+    supermarketStatus, 
+    setSupermarketStatus,
+    products 
+  } = useContext(AppContext);
+  
   const [state, setState] = useState({
-    supermarkets: [],
-    loading: true,
-    error: null,
-    currentStep: 'supermarkets',
-    selectedSupermarket: null,
-    locations: [],
-    selectedLocationId: null,
-    products: [],
     searchQuery: '',
     selectedCategory: 'Tous',
-    supermarketStatus: null,
   });
 
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
 
+  // Charger les produits et le statut du supermarché
   useEffect(() => {
-    const checkAuthAndFetch = async () => {
+    const fetchData = async () => {
       try {
-        const token = await AsyncStorage.getItem('token');
-        if (!token) {
-          Alert.alert(
-            'Connexion requise',
-            'Vous devez vous connecter.',
-            [{ text: 'Se connecter', onPress: () => navigation.navigate('Login') }]
-          );
-          setState((prev) => ({ ...prev, error: 'Utilisateur non connecté', loading: false }));
+        setLoading(true);
+        setError(null);
+        
+        if (!selectedSupermarket || !selectedLocationId) {
+          setError('Aucun site sélectionné.');
           return;
         }
-        await fetchSupermarkets();
+        
+        // Charger les produits
+        const response = await getProducts(selectedSupermarket._id, selectedLocationId);
+        const fetchedProducts = Array.isArray(response) ? response : [];
+        setProducts(fetchedProducts);
+        
+        // Charger le statut du supermarché
+        const statusResponse = await getSupermarketStatus(selectedSupermarket._id);
+        setSupermarketStatus({
+          ...statusResponse,
+          isOpen: statusResponse.status === 'open'
+        });
+        
         Animated.timing(fadeAnim, {
           toValue: 1,
           duration: 800,
           useNativeDriver: true,
         }).start();
       } catch (err) {
-        setState((prev) => ({ ...prev, error: 'Erreur d’authentification', loading: false }));
+        setError(`Erreur: ${err.message}`);
+        if (err.response?.status === 401) navigation.navigate('Login');
+      } finally {
+        setLoading(false);
       }
     };
-    checkAuthAndFetch();
-  }, []);
-
-  const fetchSupermarkets = useCallback(async () => {
-    try {
-      setState((prev) => ({ ...prev, loading: true }));
-      const token = await AsyncStorage.getItem('token');
-      const response = await getSupermarkets();
-      const supermarketsWithStatus = await Promise.all(
-        response.data.map(async (supermarket) => {
-          const status = await getSupermarketStatus(supermarket._id);
-          return { ...supermarket, ...status };
-        })
-      );
-      setState((prev) => ({
-        ...prev,
-        supermarkets: supermarketsWithStatus,
-        loading: false,
-      }));
-    } catch (err) {
-      console.error('Erreur:', err);
-      setState((prev) => ({
-        ...prev,
-        error: `Erreur: ${err.message}`,
-        loading: false,
-      }));
-      if (err.response?.status === 401) {
-        Alert.alert('Session expirée', 'Reconnectez-vous.', [
-          { text: 'Se connecter', onPress: () => navigation.navigate('Login') },
-        ]);
-      }
-    }
-  }, []);
-
-  const fetchLocations = useCallback((supermarket) => {
-    if (!supermarket || !supermarket._id) {
-      Alert.alert('Erreur', 'Supermarché invalide.');
-      return;
-    }
-    setState((prev) => ({
-      ...prev,
-      selectedSupermarket: supermarket,
-      locations: supermarket.locations || [],
-      currentStep: 'locations',
-      supermarketStatus: supermarket,
-    }));
-  }, []);
-
-  const fetchProducts = useCallback(async (supermarket, locationId) => {
-    try {
-      setState((prev) => ({ ...prev, loading: true }));
-      if (!supermarket || !supermarket._id) {
-        throw new Error('Aucun supermarché sélectionné');
-      }
-      const response = await getProducts(supermarket._id, locationId);
-      const products = Array.isArray(response) ? response : [];
-      setState((prev) => ({
-        ...prev,
-        products,
-        selectedLocationId: locationId,
-        loading: false,
-        currentStep: 'products',
-      }));
-    } catch (err) {
-      console.error('Erreur produits:', err);
-      setState((prev) => ({
-        ...prev,
-        error: `Erreur: ${err.message}`,
-        loading: false,
-      }));
-      if (err.response?.status === 401) {
-        Alert.alert('Session expirée', 'Reconnectez-vous.', [
-          { text: 'Se connecter', onPress: () => navigation.navigate('Login') },
-        ]);
-      }
-    }
-  }, []);
+    
+    fetchData();
+  }, [selectedLocationId]);
 
   const addToCartHandler = useCallback(
     async (product) => {
-      if (!state.supermarketStatus?.isOpen) {
-        Alert.alert('Site fermé', 'Les achats sont désactivés lorsque le site est fermé.');
+      // Vérifier si le supermarché est ouvert
+      if (!supermarketStatus || supermarketStatus.status !== 'open') {
+        Alert.alert(
+          'Site fermé', 
+          'Les achats sont désactivés lorsque le site est fermé.' +
+          (supermarketStatus?.closureReason ? `\nRaison: ${supermarketStatus.closureReason}` : '')
+        );
         return;
       }
-      const stockAtLocation = product.stockByLocation.find(
-        (stock) => stock.locationId === state.selectedLocationId
+      
+      // Vérifier le stock
+      const stockAtLocation = product.stockByLocation?.find(
+        (stock) => stock.locationId === selectedLocationId
       ) || { stock: 0 };
+      
       if (stockAtLocation.stock <= 0) {
-        Alert.alert('Erreur de stock', 'Stock indisponible.');
+        Alert.alert('Erreur de stock', 'Stock indisponible pour ce produit.');
         return;
       }
-      const result = await addToCart({
-        ...product,
-        locationId: state.selectedLocationId,
-        supermarketId: state.selectedSupermarket?._id,
-      });
-      if (result.success) {
-        Vibration.vibrate(200);
-        Alert.alert('Succès', `${product.name} ajouté au panier !`);
+      
+      try {
+        const result = await addToCart({
+          ...product,
+          locationId: selectedLocationId,
+          supermarketId: selectedSupermarket?._id,
+        });
+        
+        if (result.success) {
+          Vibration.vibrate(200);
+          Alert.alert('Succès', `${product.name} ajouté au panier !`);
+        }
+      } catch (error) {
+        Alert.alert('Erreur', error.message || 'Impossible d\'ajouter le produit');
       }
     },
-    [state.selectedLocationId, state.selectedSupermarket, addToCart, state.supermarketStatus]
+    [selectedLocationId, selectedSupermarket, addToCart, supermarketStatus]
   );
 
   const filteredProducts = useCallback(() => {
-    let filtered = [...state.products];
+    if (!products || !Array.isArray(products)) return [];
+    
+    let filtered = [...products];
     if (state.selectedCategory !== 'Tous') {
       filtered = filtered.filter((p) => p.category === state.selectedCategory);
     }
     if (state.searchQuery) {
       const query = state.searchQuery.toLowerCase();
       filtered = filtered.filter(
-        (p) => p.name.toLowerCase().includes(query) || p.description.toLowerCase().includes(query)
+        (p) => 
+          (p.name && p.name.toLowerCase().includes(query)) || 
+          (p.description && p.description.toLowerCase().includes(query))
       );
     }
     return filtered;
-  }, [state.products, state.selectedCategory, state.searchQuery]);
-
-  const renderItem = useCallback(
-    ({ item, type }) => {
-      switch (type) {
-        case 'supermarket':
-          return (
-            <TouchableOpacity style={styles.supermarketItem} onPress={() => fetchLocations(item)}>
-              <Text style={styles.itemText}>{item.name}</Text>
-              <Text style={styles.subText}>
-                {item.locations.length} site(s) -{' '}
-                {item.isOpen ? 'Ouvert' : `Fermé (${item.status || 'Inconnu'})`}
-              </Text>
-            </TouchableOpacity>
-          );
-        case 'location':
-          return (
-            <TouchableOpacity style={styles.locationItem} onPress={() => fetchProducts(state.selectedSupermarket, item._id)}>
-              <Text style={styles.itemText}>{item.name}</Text>
-              <Text style={styles.subText}>{item.address}</Text>
-            </TouchableOpacity>
-          );
-        case 'product':
-          const stockAtLocation = item.stockByLocation?.find((s) => s.locationId === state.selectedLocationId) || { stock: 0 };
-          const stockColor = stockAtLocation.stock > 15 ? '#00FF00' : stockAtLocation.stock >= 7 ? '#FFD700' : '#FF0000';
-          const imageSource = imageMap[item._id] || null;
-          const isPromoted = item.promotedPrice !== null && item.promotedPrice < item.price;
-          const discountPercentage = isPromoted ? Math.round(((item.price - item.promotedPrice) / item.price) * 100) : 0;
-
-          return (
-            <Animated.View style={[styles.productCard, { opacity: fadeAnim }]}>
-              {isPromoted && (
-                <Animated.View
-                  style={[
-                    styles.promoBadge,
-                    { opacity: fadeAnim },
-                  ]}
-                >
-                  <Text style={styles.promoText}>{`-${discountPercentage}%`}</Text>
-                </Animated.View>
-              )}
-              <View style={styles.productImageContainer}>
-                {imageSource ? (
-                  <Image source={imageSource} style={styles.productImage} resizeMode="contain" />
-                ) : (
-                  <View style={styles.placeholderImage}>
-                    <Text style={styles.placeholderText}>Image à venir</Text>
-                  </View>
-                )}
-              </View>
-              <View style={styles.productInfo}>
-                <Text style={styles.productName}>{item.name}</Text>
-                <View style={styles.priceContainer}>
-                  {isPromoted ? (
-                    <>
-                      <Text style={styles.promotedPrice}>{item.promotedPrice} FCFA</Text>
-                      <Text style={styles.originalPrice}>{item.price} FCFA</Text>
-                    </>
-                  ) : (
-                    <Text style={styles.productPrice}>{item.price} FCFA</Text>
-                  )}
-                </View>
-                <Text style={styles.productWeight}>{item.weight} kg</Text>
-                <View style={[styles.stockIndicator, { backgroundColor: stockColor }]} />
-              </View>
-              <TouchableOpacity
-                style={[
-                  styles.addButton,
-                  !state.supermarketStatus?.isOpen && styles.disabledButton,
-                ]}
-                onPress={() => addToCartHandler(item)}
-                disabled={!state.supermarketStatus?.isOpen}
-              >
-                <Ionicons name="cart-outline" size={24} color="#fff" />
-              </TouchableOpacity>
-            </Animated.View>
-          );
-        default:
-          return null;
-      }
-    },
-    [state.selectedSupermarket, state.selectedLocationId, addToCartHandler, fadeAnim, state.supermarketStatus]
-  );
+  }, [products, state.selectedCategory, state.searchQuery]);
 
   const renderCartIcon = useCallback(() => {
-    const cartCount = cart.length;
+    const cartCount = cart.reduce((total, item) => total + (item.quantity || 0), 0);
+    
     return (
-      <View
+      <TouchableOpacity 
         style={styles.cartIcon}
-        onLongPress={() => Alert.alert('Panier', `Contient ${cartCount} articles`)}
+        onPress={() => navigation.navigate('Cart')}
       >
         <Ionicons name="cart" size={30} color="#333" />
         {cartCount > 0 && (
@@ -274,9 +153,9 @@ export default function CatalogueScreen({ navigation }) {
             <Text style={styles.badgeText}>{cartCount}</Text>
           </View>
         )}
-      </View>
+      </TouchableOpacity>
     );
-  }, [cart]);
+  }, [cart, navigation]);
 
   const categories = [
     'Tous',
@@ -316,51 +195,41 @@ export default function CatalogueScreen({ navigation }) {
     </ScrollView>
   );
 
-  if (state.loading) {
+  if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#808080" />
-        <Text style={styles.loadingText}>Chargement...</Text>
       </SafeAreaView>
     );
   }
 
-  if (state.error) {
+  if (error) {
     return (
       <SafeAreaView style={styles.errorContainer}>
-        <Text style={styles.errorText}>{state.error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={fetchSupermarkets}>
-          <Text style={styles.retryButtonText}>Réessayer</Text>
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity style={styles.retryButton} onPress={() => navigation.goBack()}>
+          <Text style={styles.retryButtonText}>Retour</Text>
         </TouchableOpacity>
       </SafeAreaView>
     );
   }
 
   const displayedProducts = filteredProducts();
-  const hasProducts = displayedProducts.length > 0;
 
   return (
     <SafeAreaView style={styles.container}>
-      {state.supermarketStatus && !state.supermarketStatus.isOpen && (
+      {supermarketStatus && supermarketStatus.status !== 'open' && (
         <View style={styles.banner}>
           <Text style={styles.bannerText}>
             Ce site est actuellement fermé. Vous pouvez consulter le catalogue, mais les achats sont désactivés.
-            {state.supermarketStatus.status && ` Raison : ${state.supermarketStatus.status}`}
+            {supermarketStatus.closureReason && `\nRaison: ${supermarketStatus.closureReason}`}
           </Text>
         </View>
       )}
       <View style={styles.header}>
         <View style={styles.headerRow}>
-          <TouchableOpacity
-            onPress={() => {
-              if (state.currentStep === 'locations' || state.currentStep === 'products') {
-                fetchLocations(state.selectedSupermarket);
-              } else {
-                setState((prev) => ({ ...prev, currentStep: 'supermarkets' }));
-              }
-            }}
-          >
-            <Text style={styles.backButton}>Site</Text>
+          <TouchableOpacity onPress={() => navigation.goBack()}>
+            <Text style={styles.backButton}>Retour</Text>
           </TouchableOpacity>
           <Text style={styles.title}>Catalogue</Text>
           {renderCartIcon()}
@@ -378,39 +247,33 @@ export default function CatalogueScreen({ navigation }) {
         {renderCategoryTabs()}
       </View>
       <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
-        {state.currentStep === 'supermarkets' && (
-          <FlatList
-            data={state.supermarkets}
-            renderItem={(props) => renderItem({ ...props, type: 'supermarket' })}
-            keyExtractor={(item) => item._id}
-            style={styles.list}
-            ListEmptyComponent={<Text style={styles.emptyText}>Aucun supermarché.</Text>}
-          />
-        )}
-        {state.currentStep === 'locations' && (
-          <FlatList
-            data={state.locations}
-            renderItem={(props) => renderItem({ ...props, type: 'location' })}
-            keyExtractor={(item) => item._id}
-            style={styles.list}
-            ListEmptyComponent={<Text style={styles.emptyText}>Aucun site.</Text>}
-          />
-        )}
-        {state.currentStep === 'products' && (
-          <FlatList
-            data={displayedProducts}
-            renderItem={(props) => renderItem({ ...props, type: 'product' })}
-            keyExtractor={(item) => item._id}
-            numColumns={2}
-            columnWrapperStyle={styles.columnWrapper}
-            style={styles.list}
-            ListEmptyComponent={<Text style={styles.emptyText}>Aucun produit trouvé.</Text>}
-          />
-        )}
+        <FlatList
+          data={displayedProducts}
+          renderItem={({ item }) => (
+            <ProductItem 
+              item={item} 
+              addToCartHandler={addToCartHandler} 
+              fadeAnim={fadeAnim} 
+              isSupermarketOpen={supermarketStatus?.status === 'open'}
+            />
+          )}
+          keyExtractor={(item) => item._id}
+          numColumns={2}
+          columnWrapperStyle={styles.columnWrapper}
+          style={styles.list}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>Aucun produit trouvé.</Text>
+              <Text style={styles.emptySubText}>Veuillez vérifier votre sélection ou votre recherche.</Text>
+            </View>
+          }
+        />
       </Animated.View>
     </SafeAreaView>
   );
-}
+};
+
+export default CatalogueScreen;
 
 const styles = StyleSheet.create({
   container: {
@@ -452,6 +315,7 @@ const styles = StyleSheet.create({
   },
   cartIcon: {
     padding: 5,
+    position: 'relative',
   },
   badge: {
     position: 'absolute',
@@ -514,150 +378,11 @@ const styles = StyleSheet.create({
   columnWrapper: {
     justifyContent: 'space-between',
   },
-  supermarketItem: {
-    marginVertical: 8,
-    borderRadius: 10,
-    backgroundColor: '#fff',
-    padding: 15,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-  },
-  locationItem: {
-    marginVertical: 8,
-    borderRadius: 10,
-    backgroundColor: '#fff',
-    padding: 15,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-  },
-  productCard: {
-    flex: 1,
-    margin: 5,
-    borderRadius: 10,
-    backgroundColor: '#fff',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    maxWidth: '48%',
-  },
-  productImageContainer: {
-    aspectRatio: 1,
-    width: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
-  },
-  productImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'contain',
-  },
-  placeholderImage: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#ccc',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  placeholderText: {
-    color: '#666',
-    fontSize: 12,
-  },
-  productInfo: {
-    padding: 10,
-  },
-  productName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  priceContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  productPrice: {
-    fontSize: 14,
-    color: '#666',
-  },
-  promotedPrice: {
-    fontSize: 16,
-    color: '#28a745',
-    fontWeight: 'bold',
-    marginRight: 8,
-  },
-  originalPrice: {
-    fontSize: 14,
-    color: '#999',
-    textDecorationLine: 'line-through',
-  },
-  productWeight: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 2,
-  },
-  stockIndicator: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    position: 'absolute',
-    top: 5,
-    right: 5,
-  },
-  addButton: {
-    backgroundColor: '#007bff',
-    padding: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-    margin: 10,
-  },
-  disabledButton: {
-    backgroundColor: '#ccc',
-    opacity: 0.5,
-  },
-  promoBadge: {
-    position: 'absolute',
-    top: 5,
-    left: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 5,
-    backgroundColor: '#28a745',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#fff',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-  },
-  promoText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: '#f5f5f5',
-  },
-  loadingText: {
-    marginTop: 10,
-    fontSize: 16,
-    color: '#666',
   },
   errorContainer: {
     flex: 1,
@@ -682,10 +407,23 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
   emptyText: {
     textAlign: 'center',
     color: '#666',
-    fontSize: 16,
+    fontSize: 18,
+    fontWeight: 'bold',
     marginTop: 20,
+  },
+  emptySubText: {
+    textAlign: 'center',
+    color: '#999',
+    fontSize: 14,
+    marginTop: 10,
   },
 });

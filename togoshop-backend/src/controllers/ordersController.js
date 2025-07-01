@@ -63,8 +63,12 @@ exports.addToCart = async (req, res) => {
         totalAmount: 0,
         deliveryFee: 500,
       });
+    } else if (order.products.length === 0) {
+      // Si le panier est vide, autoriser la mise à jour du supermarché
+      order.supermarketId = supermarketId;
+      order.locationId = locationId;
     } else if (order.supermarketId.toString() !== supermarketId || order.locationId !== locationId) {
-      return res.status(400).json({ error: 'Même supermarché/emplacement requis' });
+      return res.status(400).json({ error: 'Vous devez passer commande depuis le même supermarché et emplacement' });
     }
 
     const now = new Date();
@@ -257,7 +261,7 @@ exports.getUserCart = async (req, res) => {
       .sort({ updatedAt: -1 })
       .populate({
         path: 'products.productId',
-        select: 'name price stockByLocation weight',
+        select: 'name price stockByLocation weight imageUrl',
       })
       .populate({
         path: 'supermarketId',
@@ -265,12 +269,14 @@ exports.getUserCart = async (req, res) => {
       })
       .lean();
 
-    if (!order) {
-      console.log(`Aucune commande trouvée pour l'utilisateur: ${userId}`);
+    if (!order || !order.products || order.products.length === 0) {
+      console.log(`Aucune commande valide trouvée pour l'utilisateur: ${userId}`);
       return res.status(200).json({
         message: 'Aucune commande dans le panier',
         order: null,
         products: [],
+        supermarketId: null, 
+        locationId: null,    
         orderId: null,
       });
     }
@@ -291,6 +297,7 @@ exports.getUserCart = async (req, res) => {
     order.products = order.products.map(product => ({
       ...product,
       promotedPrice: null, // Par défaut, pas de promotion
+      imageUrl: product.productId.imageUrl || 'https://via.placeholder.com/150', // Ajout d'une URL par défaut
     }));
 
     // Appliquer les prix promus
@@ -312,6 +319,7 @@ exports.getUserCart = async (req, res) => {
       alternativeLocationId: product.alternativeLocationId || '',
       stockByLocation: product.productId.stockByLocation || [],
       weight: Number(product.productId.weight) || 0,
+      imageUrl: product.imageUrl, // Utiliser l'imageUrl défini précédemment
       promotedPrice: product.promotedPrice !== null ? Number(product.promotedPrice) : null,
     }));
 
@@ -325,14 +333,27 @@ exports.getUserCart = async (req, res) => {
 
     console.log(`Sous-total calculé: ${calculatedSubtotal}, Total calculé: ${calculatedTotal}`);
 
+    // Mettre à jour la commande si nécessaire
     if (order.subtotal !== calculatedSubtotal || order.totalAmount !== calculatedTotal) {
       console.log(`Mise à jour: subtotal: ${order.subtotal} -> ${calculatedSubtotal}, total: ${order.totalAmount} -> ${calculatedTotal}`);
-      order.subtotal = calculatedSubtotal;
-      order.totalAmount = calculatedTotal;
-      await Order.updateOne(
-        { _id: order._id },
-        { $set: { subtotal: calculatedSubtotal, totalAmount: calculatedTotal, products: order.products, updatedAt: new Date() } }
-      );
+      
+      const updateData = {
+        subtotal: calculatedSubtotal,
+        totalAmount: calculatedTotal,
+        products: order.products,
+        updatedAt: new Date()
+      };
+
+      // Si le panier est vide après mise à jour
+      if (order.products.length === 0) {
+        updateData.supermarketId = null;
+        updateData.locationId = null;
+        updateData.deliveryFee = 0;
+        updateData.serviceFee = 0;
+        updateData.additionalFees = 0;
+      }
+
+      await Order.updateOne({ _id: order._id }, { $set: updateData });
     }
 
     // Ajouter orderId à la réponse
@@ -342,6 +363,9 @@ exports.getUserCart = async (req, res) => {
       ...order,
       products: order.products,
       orderId: order._id,
+      // Garantir que ces valeurs sont présentes même si null
+      supermarketId: order.supermarketId || null,
+      locationId: order.locationId || null
     });
   } catch (error) {
     console.error('Erreur lors de la récupération du panier:', error.message);
@@ -353,23 +377,26 @@ exports.getUserCart = async (req, res) => {
 exports.getOrderById = async (req, res) => {
   try {
     const { id } = req.params;
+    console.log(`[NEW REQUEST] Tentative de récupération de la commande avec id: ${id} at ${new Date().toISOString()}`);
 
     const order = await Order.findById(id)
-      .select('status paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId subtotal serviceFee totalAmount queuePosition validationCode')
+      .select('status paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId subtotal serviceFee totalAmount queuePosition validationCode driverId estimatedTime imageUrl')
       .populate('driverId', 'name phoneNumber') 
       .populate('products.productId')
       .populate('supermarketId');
       
 
     if (!order) {
+      console.log(`Aucune commande trouvée pour l'id: ${id}`);
       return res.status(404).json({ message: 'Commande non trouvée' });
     }
 
     if (req.user.role !== 'admin' && order.clientId.toString() !== req.user.id) {
+      console.log(`Accès refusé: Utilisateur ${req.user.id} tente d'accéder à la commande ${id} de ${order.clientId}`);
       return res.status(403).json({ message: 'Accès non autorisé' });
     }
 
-    console.log('Order renvoyé par getOrderById:', order);
+    console.log(`Commande renvoyée pour id ${id}:`, order);
 
     let zoneOrders = [];
     if (order.zoneId && order.status === 'ready_for_pickup' && req.user.role === 'driver') {
@@ -378,7 +405,7 @@ exports.getOrderById = async (req, res) => {
         status: 'ready_for_pickup',
         deliveryType: { $ne: 'evening' },
       })
-        .select('paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId subtotal serviceFee totalAmount') // Ajout des champs ici aussi
+        .select('paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId subtotal serviceFee totalAmount imageUrl') // Ajout des champs ici aussi
         .populate('products.productId')
         .populate('supermarketId');
     }
@@ -397,6 +424,7 @@ exports.getOrderById = async (req, res) => {
 
     res.status(200).json({ order, zoneOrders, queuePosition: order.queuePosition, estimatedTime });
   } catch (error) {
+    console.error(`Erreur lors de la récupération de la commande ${req.params.id}:`, error.message);
     res.status(500).json({ message: 'Erreur lors de la récupération de la commande', error: error.message });
   }
 };
@@ -473,20 +501,50 @@ exports.updateOrder = async (req, res) => {
       return res.status(400).json({ message: 'Liste de produits requise' });
     }
 
-    // Récupérer les données des produits
-    const productIds = products.map(p => p.productId);
-    const productData = await Product.find({ _id: { $in: productIds } }).lean();
-    if (productData.length !== productIds.length) {
-      return res.status(400).json({ message: 'Certains produits n’ont pas été trouvés' });
+    // Log du corps reçu pour débogage
+    console.log('Corps reçu dans updateOrder:', req.body);
+
+    // Validation des locationId des produits
+    const invalidLocation = products.some(p => 
+      p.locationId && p.locationId !== order.locationId
+    );
+    if (invalidLocation && order.locationId) {
+      console.log('IDs de localisation:', {
+        orderLocation: order.locationId,
+        productLocation: products.find(p => p.locationId).locationId
+      });
+      return res.status(400).json({ message: 'ID de localisation invalide pour les produits' });
     }
 
-    const { stockIssues, updatedProducts, subtotal, totalWeight, deliveryFee, additionalFees, serviceFee, totalAmount } = await validateStock(
-      products,
-      order.supermarketId.toString(),
-      order.locationId,
-      order.deliveryType,
-      deliveryAddress || order.deliveryAddress
-    );
+    // Gestion du panier vide
+    let stockIssues = [];
+    let validationResult = {
+      updatedProducts: [],
+      subtotal: 0,
+      deliveryFee: 0,
+      additionalFees: 0,
+      serviceFee: 0,
+      totalAmount: 0
+    };
+
+    // Appeler validateStock uniquement si le panier n'est pas vide
+    if (products.length > 0) {
+      // Récupérer les données des produits
+      const productIds = products.map(p => p.productId);
+      const productData = await Product.find({ _id: { $in: productIds } }).lean();
+      if (productData.length !== productIds.length) {
+        return res.status(400).json({ message: 'Certains produits n’ont pas été trouvés' });
+      }
+
+      validationResult = await validateStock(
+        products,
+        order.supermarketId?.toString() || null,
+        order.locationId,
+        order.deliveryType,
+        deliveryAddress || order.deliveryAddress
+      );
+      stockIssues = validationResult.stockIssues;
+    }
 
     if (stockIssues.length > 0) {
       return res.status(200).json({
@@ -499,9 +557,9 @@ exports.updateOrder = async (req, res) => {
           D: 'Être notifié quand le produit est disponible',
         },
         partialOrder: {
-          products: updatedProducts,
-          subtotal: roundToTwoDecimals(subtotal),
-          deliveryFee: roundToTwoDecimals(deliveryFee),
+          products: validationResult.updatedProducts,
+          subtotal: roundToTwoDecimals(validationResult.subtotal),
+          deliveryFee: roundToTwoDecimals(validationResult.deliveryFee),
         },
       });
     }
@@ -515,41 +573,56 @@ exports.updateOrder = async (req, res) => {
       };
     }
 
-    // Vérifier les promotions actives
-    const now = new Date();
-    const promotions = await Promotion.find({
-      productId: { $in: updatedProducts.map(p => p.productId) },
-      isActive: true,
-      startDate: { $lte: now },
-      endDate: { $gte: now },
-      $expr: { $lt: ['$currentUses', '$maxUses'] },
-    }).populate('productId');
+    // Appliquer les promotions uniquement si le panier n'est pas vide
+    if (products.length > 0) {
+      // Vérifier les promotions actives
+      const now = new Date();
+      const promotions = await Promotion.find({
+        productId: { $in: validationResult.updatedProducts.map(p => p.productId) },
+        isActive: true,
+        startDate: { $lte: now },
+        endDate: { $gte: now },
+        $expr: { $lt: ['$currentUses', '$maxUses'] },
+      }).populate('productId');
 
-    // Appliquer les prix promus
-    updatedProducts.forEach(product => {
-      const promo = promotions.find(p => p.productId._id.toString() === product.productId.toString());
-      if (promo && promo.promotedPrice !== null) {
-        product.promotedPrice = promo.promotedPrice;
-      } else {
-        delete product.promotedPrice;
+      // Appliquer les prix promus
+      validationResult.updatedProducts.forEach(product => {
+        const promo = promotions.find(p => p.productId._id.toString() === product.productId.toString());
+        if (promo && promo.promotedPrice !== null) {
+          product.promotedPrice = promo.promotedPrice;
+        } else {
+          delete product.promotedPrice;
+        }
+      });
+    }
+
+    order.products = validationResult.updatedProducts;
+    
+    // Réinitialiser complètement si le panier est vide
+    if (order.products.length === 0) {
+      order.supermarketId = null;
+      order.locationId = null; 
+      order.deliveryFee = 0;
+      order.serviceFee = 0;
+      order.additionalFees = 0;
+      order.totalAmount = 0;
+      order.subtotal = 0;
+    } else {
+      // Recalculer les totaux si le panier n'est pas vide
+      order.subtotal = roundToTwoDecimals(validationResult.subtotal);
+      order.deliveryFee = roundToTwoDecimals(validationResult.deliveryFee);
+      order.serviceFee = roundToTwoDecimals(validationResult.serviceFee);
+      order.totalAmount = roundToTwoDecimals(validationResult.totalAmount);
+      if (!order.locationId) {
+        return res.status(400).json({ message: 'ID de localisation manquant' });
       }
-    });
+    }
 
-    // Recalculer les totaux avec les prix promus
-    const calculatedSubtotal = updatedProducts.reduce((sum, item) => {
-      const product = productData.find(p => p._id.toString() === item.productId.toString()) || {};
-      const price = item.promotedPrice || product.price || 0;
-      return sum + price * item.quantity;
-    }, 0);
-
-    order.products = updatedProducts;
-    order.subtotal = roundToTwoDecimals(calculatedSubtotal);
-    order.deliveryFee = roundToTwoDecimals(deliveryFee);
-    order.serviceFee = roundToTwoDecimals(serviceFee);
-    order.totalAmount = roundToTwoDecimals(calculatedSubtotal + deliveryFee + serviceFee + (additionalFees || 0));
     await order.save();
 
+    // Recharger l'ordre pour avoir les dernières données
     order = await Order.findById(id).populate('products.productId');
+    
     res.status(200).json({
       success: true,
       order: {
@@ -939,7 +1012,7 @@ exports.getManagerOrders = async (req, res) => {
       ],
     })
       .populate('clientId', 'name comments')
-      .populate('products.productId', 'name price')
+      .populate('products.productId', 'name price imageUrl')
       .sort('createdAt');
 
     if (!orders.length) {

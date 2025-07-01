@@ -53,28 +53,23 @@ exports.registerDriver = async (req, res) => {
 };
 
 // Connexion d’un livreur
+// Remplacer la fonction loginDriver
 exports.loginDriver = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { name, phoneNumber } = req.body; 
 
     // Vérifier les champs
-    if (!email || !password) {
-      return res.status(400).json({ message: 'Email et mot de passe requis' });
+    if (!name || !phoneNumber) {
+      return res.status(400).json({ message: 'Nom et numéro de téléphone requis' });
     }
 
-    // Trouver le livreur
-    const driver = await Driver.findOne({ email });
+    // CORRECTION: Utiliser phoneNumber au lieu de phone
+    const driver = await Driver.findOne({ name, phoneNumber });
     if (!driver) {
-      return res.status(401).json({ message: 'Email ou mot de passe incorrect' });
+      return res.status(401).json({ message: 'Nom ou numéro de téléphone incorrect' });
     }
 
-    // Vérifier le mot de passe
-    const isMatch = await bcrypt.compare(password, driver.password);
-    if (!isMatch) {
-      return res.status(401).json({ message: 'Email ou mot de passe incorrect' });
-    }
-
-    // Mettre à jour le statut
+    // Pas de vérification de mot de passe (authentification par nom/numéro)
     driver.status = 'available';
     await driver.save();
 

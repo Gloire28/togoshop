@@ -36,7 +36,7 @@ const supermarketSchema = new mongoose.Schema({
       required: true,
     },
     role: {
-      type: [String], // Tableau pour les rôles
+      type: [String], 
       enum: ['order_validator', 'stock_manager', 'manager'],
       required: true,
     },
@@ -51,7 +51,7 @@ const supermarketSchema = new mongoose.Schema({
     default: 'open',
     required: true,
   },
-  isOpen: { // Nouveau champ
+  isOpen: { 
     type: Boolean,
     default: true,
   },

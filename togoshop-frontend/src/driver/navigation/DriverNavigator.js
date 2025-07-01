@@ -20,7 +20,7 @@ export default function DriverNavigator() {
       <Stack.Screen
         name="DriverLogin"
         component={DriverLoginScreen}
-        options={{ title: 'Connexion Livreur' }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="DriverDashboard"

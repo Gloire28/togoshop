@@ -40,11 +40,13 @@ const orderSchema = new mongoose.Schema({
   supermarketId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Supermarket',
-    required: true,
+    required: false, 
   },
   locationId: {
     type: String,
-    required: true,
+    required: function() {
+      return this.products && this.products.length > 0;
+    },
   },
   products: [productSchema],
   deliveryAddress: {
@@ -184,7 +186,7 @@ orderSchema.pre('save', async function(next) {
       supermarketId: this.supermarketId,
       locationId: this.locationId,
       status: { $in: ['pending_validation', 'awaiting_validator'] },
-      _id: { $ne: this._id }, // Exclure la commande actuelle
+      _id: { $ne: this._id }, 
     });
     this.queuePosition = pendingOrders + 1;
   }

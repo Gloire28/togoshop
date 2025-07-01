@@ -28,12 +28,15 @@ const productSchema = new mongoose.Schema({
     locationId: {
       type: String,
       required: true,
+      validate: {
+        validator: v => v && v.trim().length > 0,
+        message: 'locationId ne peut pas être vide'
+      }
     },
     stock: {
       type: Number,
       required: true,
-      min: 0,
-      default: 0,
+      min: [0, 'Le stock ne peut pas être négatif']
     },
     _id: {
       type: mongoose.Schema.Types.ObjectId,
@@ -49,16 +52,17 @@ const productSchema = new mongoose.Schema({
     default: false,
   },
   imageUrl: {
-    type: String,
-    trim: true,
+  type: String,
+  trim: true,
+  match: [/^https:\/\/[^\s$.?#].[^\s]*\?.*$|^$/, 'URL d\'image invalide ou manquante'], 
   },
   promotedPrice: {
-    type: Number, // Nouveau champ pour stocker le prix promu (optionnel)
+    type: Number, 
     default: null,
   },
   activePromotion: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Promotion', // Référence à la promotion active (facultatif)
+    ref: 'Promotion', 
     default: null,
   },
   createdAt: {
@@ -76,7 +80,7 @@ productSchema.pre('save', function(next) {
   next();
 });
 
-// Hook pour mettre à jour promotedPrice si une promotion est appliquée (à activer via contrôleur)
+// Hook pour mettre à jour promotedPrice si une promotion est appliquée
 productSchema.methods.updatePromotedPrice = function(discountType, discountValue) {
   if (discountType === 'percentage') {
     this.promotedPrice = this.price * (1 - discountValue / 100);

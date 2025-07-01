@@ -58,45 +58,51 @@ exports.register = async (req, res) => {
 // Connexion
 exports.login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const name = req.body.name?.trim();
+    const phone = req.body.phone?.toString().trim();
 
-    if (!email || !password) {
-      return res.status(400).json({ message: 'Email et mot de passe requis' });
+    if (!name || !phone) {
+      return res.status(400).json({ message: 'Nom et numéro de téléphone requis' });
     }
 
-    console.log('Requête reçue: POST /api/auth/login');
-    console.log('Recherche de l’utilisateur avec email:', email);
+    console.log('Recherche normalisée - name:', `"${name}"`, 'phone:', `"${phone}"`);
 
     // Recherche dans User (clients/admins)
-    let user = await User.findOne({ email });
+    let user = await User.findOne({ 
+      name: { $regex: new RegExp(`^${name}$`, 'i') },
+      phone
+    });
+
     let role = user ? user.role : null;
     let Model = User;
 
     if (!user) {
       console.log('Utilisateur non trouvé dans User, recherche dans Manager...');
-      user = await Manager.findOne({ email });
+      user = await Manager.findOne({ 
+        name: { $regex: new RegExp(`^${name}$`, 'i') },
+        phone: parseInt(phone)
+      });
       role = 'manager';
       Model = Manager;
     }
 
     if (!user) {
       console.log('Utilisateur non trouvé dans Manager, recherche dans Driver...');
-      user = await Driver.findOne({ email });
+      user = await Driver.findOne({ 
+        name: { $regex: new RegExp(`^${name}$`, 'i') },
+        phoneNumber: parseInt(phone)
+      });
       role = 'driver';
       Model = Driver;
     }
 
     if (!user) {
-      console.log('Utilisateur non trouvé pour email:', email);
+      console.log('Utilisateur non trouvé pour name:', name, 'et phone:', phone);
       return res.status(404).json({ message: 'Utilisateur non trouvé' });
     }
 
     console.log('Utilisateur trouvé:', user);
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      console.log('Mot de passe incorrect pour email:', email);
-      return res.status(401).json({ message: 'Mot de passe incorrect' });
-    }
+    // Pas de vérification de mot de passe ici, car on utilise name + phone comme clé
 
     // Générer un token JWT avec une structure unifiée
     const tokenPayload = {
@@ -116,11 +122,11 @@ exports.login = async (req, res) => {
     // Construire l'objet user à renvoyer
     const userResponse = {
       id: user._id,
-      email: user.email,
+      name: user.name,
       role: role || (Model === Manager ? user.roles[0] : 'client'),
-      // Ajouter d'autres champs pertinents selon le modèle (ex. name pour Manager/Driver)
-      ...(Model === Manager && { name: user.name, supermarketId: user.supermarketId, locationId: user.locationId }),
-      ...(Model === Driver && { name: user.name, phoneNumber: user.phoneNumber }),
+      // Ajouter d'autres champs pertinents selon le modèle
+      ...(Model === Manager && { supermarketId: user.supermarketId, locationId: user.locationId }),
+      ...(Model === Driver && { phoneNumber: user.phoneNumber }),
     };
 
     res.status(200).json({ token, user: userResponse });

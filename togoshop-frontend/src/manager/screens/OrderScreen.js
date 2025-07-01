@@ -121,10 +121,23 @@ export default function OrderScreen() {
 
   const renderProduct = ({ item, orderId }) => {
     const isChecked = checkedProducts[orderId]?.[item._id] || false;
+    const imageUrl = item.productId?.imageUrl || 'https://via.placeholder.com/150'; // Utiliser imageUrl du produit avec fallback
 
     return (
       <View style={[styles.productCard, isChecked ? styles.productCardChecked : null]}>
         <View style={styles.productDetails}>
+          {imageUrl ? (
+            <Image
+              style={styles.productImage}
+              source={{ uri: imageUrl }}
+              resizeMode="contain"
+              onError={(e) => console.log('Erreur détaillée image:', { error: e.nativeEvent.error, url: imageUrl })}
+            />
+          ) : (
+            <View style={styles.placeholderImage}>
+              <Text style={styles.placeholderText}>Image à venir</Text>
+            </View>
+          )}
           <Text style={styles.productName}>{item.productId?.name || 'Produit inconnu'}</Text>
           <Text style={styles.productQuantity}>Quantité: {item.quantity}</Text>
         </View>
@@ -257,7 +270,7 @@ export default function OrderScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    marginTop:20,
+    marginTop: 20,
     backgroundColor: '#f5f5f5',
     padding: 15,
   },
@@ -342,6 +355,25 @@ const styles = StyleSheet.create({
   },
   productDetails: {
     flex: 1,
+  },
+  productImage: {
+    width: 50,
+    height: 50,
+    marginRight: 10,
+    borderRadius: 5,
+  },
+  placeholderImage: {
+    width: 50,
+    height: 50,
+    backgroundColor: '#ccc',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+    borderRadius: 5,
+  },
+  placeholderText: {
+    color: '#666',
+    fontSize: 10,
   },
   productName: {
     fontSize: 16,

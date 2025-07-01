@@ -2,12 +2,12 @@ import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import HomeStack from './HomeStack';
-import CatalogueStack from './CatalogueStack';
+import SupermarketScreen from '../screens/SupermarketScreen';
 import CartStack from './CartStack';
 import ProfileStack from './ProfileStack';
 import PromotionsStack from './PromotionsStack';
 import LoyaltyStack from './LoyaltyStack';
-import TrackingStack from './TrackingStack';
+import CatalogueStack from './CatalogueStack';
 
 const Tab = createBottomTabNavigator();
 
@@ -26,9 +26,9 @@ export default function MainTabs({ route }) {
             Profile: focused ? 'person' : 'person-outline',
             Promotions: focused ? 'pricetag' : 'pricetag-outline',
             Loyalty: focused ? 'star' : 'star-outline',
-            Tracking: focused ? 'navigate' : 'navigate-outline',
           };
-          return <Ionicons name={icons[route.name]} size={size} color={color} />;
+          const iconName = icons[route.name];
+          return iconName ? <Ionicons name={iconName} size={size} color={color} /> : null;
         },
         tabBarActiveTintColor: '#007bff',
         tabBarInactiveTintColor: 'gray',
@@ -41,7 +41,6 @@ export default function MainTabs({ route }) {
       <Tab.Screen name="Profile" component={ProfileStack} />
       <Tab.Screen name="Promotions" component={PromotionsStack} />
       <Tab.Screen name="Loyalty" component={LoyaltyStack} />
-      <Tab.Screen name="Tracking" component={TrackingStack} />
     </Tab.Navigator>
   );
 }

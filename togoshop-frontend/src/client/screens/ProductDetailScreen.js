@@ -49,7 +49,7 @@ export default function ProductDetailScreen({ route, navigation }) {
         ...product,
         supermarketId: route.params.supermarketId,
         locationId: route.params.locationId,
-        promotedPrice: isDiscounted ? Math.round(discountedPrice) : null, // Ajout de promotedPrice
+        promotedPrice: isDiscounted ? Math.round(discountedPrice) : null, 
       });
       Alert.alert('Succès', `${product.name} ajouté au panier${isDiscounted ? ' avec réduction' : ''}`);
     } catch (error) {
@@ -64,8 +64,8 @@ export default function ProductDetailScreen({ route, navigation }) {
       <View style={styles.productImageContainer}>
         <Image
           style={styles.productImage}
-          source={{ uri: product.image || 'https://via.placeholder.com/150' }}
-          resizeMode="contain"
+          source={{ uri: product.imageUrl || 'https://via.placeholder.com/150' }} 
+          onError={(e) => console.log('Erreur chargement image:', { error: e.nativeEvent.error, url: product.imageUrl })}
         />
       </View>
       <Text style={styles.description}>

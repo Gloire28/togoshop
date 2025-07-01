@@ -24,7 +24,6 @@ export default function ProfileScreen({ navigation }) {
       setProfileLoading(true);
       try {
         const data = await apiRequest('/users/me');
-        // Éviter une boucle infinie : ne mettre à jour user que si les données ont changé
         if (JSON.stringify(data) !== JSON.stringify(user)) {
           setUser(data);
           setName(data.name || '');
@@ -44,9 +43,7 @@ export default function ProfileScreen({ navigation }) {
       try {
         const data = await getUserOrders();
         setOrders(data || []);
-      } catch (error) {
-        console.log('Erreur lors de la récupération de l’historique des commandes:', error.message);
-        Alert.alert('Erreur', 'Impossible de récupérer l’historique des commandes');
+      } catch (error) { 
       } finally {
         setOrdersLoading(false);
       }
@@ -54,7 +51,7 @@ export default function ProfileScreen({ navigation }) {
 
     fetchUserProfile();
     fetchOrderHistory();
-  }, [user?.id]); // Dépendance sur user.id pour éviter des re-rendus inutiles
+  }, [user?.id]);
 
   const handleUpdateProfile = async () => {
     setLoading(true);
@@ -65,7 +62,7 @@ export default function ProfileScreen({ navigation }) {
       if (phone) updatedData.phone = phone;
       if (password) updatedData.password = password;
 
-      const data = await apiRequest('/users/update-profile', 'PUT', updatedData);
+      const data = await apiRequest('/users/update-profile', { method: 'PUT', body: updatedData });
       setUser(data.user);
       setIsEditing(false);
       Alert.alert('Succès', 'Profil mis à jour avec succès');
@@ -82,6 +79,11 @@ export default function ProfileScreen({ navigation }) {
     await AsyncStorage.removeItem('user');
     setUser(null);
     navigation.navigate('Login');
+  };
+
+  const handleTrackOrder = (orderId) => {
+    console.log('Navigating to Tracking with orderId:', orderId); 
+    navigation.push('TrackingStack', { orderId, key: `${orderId}-${Date.now()}` }); 
   };
 
   return (
@@ -213,6 +215,12 @@ export default function ProfileScreen({ navigation }) {
                     {order.status === 'cart_in_progress' ? 'Panier en cours' : order.status || 'N/A'}
                   </Text>
                 </View>
+                <TouchableOpacity
+                  style={styles.trackButton}
+                  onPress={() => handleTrackOrder(order._id)}
+                >
+                  <Text style={styles.trackButtonText}>Suivre</Text>
+                </TouchableOpacity>
               </View>
             );
           })
@@ -250,4 +258,6 @@ const styles = StyleSheet.create({
   orderLabel: { fontSize: 14, fontWeight: '600', color: '#666' },
   orderValue: { fontSize: 14, color: '#333' },
   noOrdersText: { fontSize: 16, color: '#666', textAlign: 'center' },
+  trackButton: { backgroundColor: '#3498db', padding: 8, borderRadius: 5, alignItems: 'center', marginTop: 10 },
+  trackButtonText: { color: '#fff', fontSize: 14, fontWeight: 'bold' },
 });

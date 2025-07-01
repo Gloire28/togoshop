@@ -65,10 +65,8 @@ export default function CartScreen({ navigation }) {
   const [tempComments, setTempComments] = useState({});
   const [isSaving, setIsSaving] = useState({});
   const [isUpdating, setIsUpdating] = useState(false);
-  // const [promoCode, setPromoCode] = useState(''); // Commenté pour désactiver la fonctionnalité promo
   const [loyaltyPoints, setLoyaltyPoints] = useState(0);
   const [usedPoints, setUsedPoints] = useState(0);
-  // const [promoApplied, setPromoApplied] = useState(null); // Commenté pour désactiver la fonctionnalité promo
 
   useEffect(() => {
     loadCartData();
@@ -85,25 +83,33 @@ export default function CartScreen({ navigation }) {
   }, [navigation]);
 
   const loadCartData = async () => {
-    try {
-      const cartResponse = await fetchCart();
-      console.log('Réponse loadCartData:', JSON.stringify(cartResponse, null, 2));
-      if (cartResponse && cartResponse.orderId) {
-        setOrderId(cartResponse.orderId);
-        console.log('Cart mis à jour dans loadCartData:', JSON.stringify(cartResponse.cart, null, 2));
-        setCart(cartResponse.cart || []);
-      } else {
-        console.log('Aucune commande valide ou panier vide:', cartResponse);
+  try {
+    const cartResponse = await fetchCart();
+    console.log('Réponse loadCartData:', JSON.stringify(cartResponse, null, 2));
+    
+    if (cartResponse && cartResponse.orderId) {
+      setOrderId(cartResponse.orderId);
+      
+      
+      const cartItems = cartResponse.cart || [];
+      setCart(cartItems);
+      
+      if (cartItems.length === 0) {
         setOrderId(null);
         setCart([]);
       }
-    } catch (err) {
-      console.error('Erreur lors du chargement des données dans loadCartData:', err.message);
+    } else {
+      console.log('Aucune commande valide ou panier vide:', cartResponse);
       setOrderId(null);
       setCart([]);
-      Alert.alert('Erreur', 'Impossible de charger le panier : ' + err.message);
     }
-  };
+  } catch (err) {
+    console.error('Erreur lors du chargement des données dans loadCartData:', err.message);
+    setOrderId(null);
+    setCart([]);
+    Alert.alert('Erreur', 'Impossible de charger le panier : ' + err.message);
+  }
+};
 
   const fetchLoyaltyPoints = async () => {
     if (user) {
@@ -122,11 +128,6 @@ export default function CartScreen({ navigation }) {
       const price = item.promotedPrice !== null && !isNaN(item.promotedPrice) ? item.promotedPrice : item.price || 0;
       return total + price * (item.quantity || 1);
     }, 0);
-    // const promoDiscount = promoApplied // Commenté pour désactiver la réduction promo
-    //   ? promoApplied.discountType === 'percentage'
-    //     ? (baseTotal * promoApplied.discountValue) / 100
-    //     : promoApplied.discountValue
-    //   : 0;
     const pointsDiscount = usedPoints * 10; // 10 FCFA par point
     return Math.max(0, baseTotal - pointsDiscount);
   }, [cart, usedPoints]);
@@ -190,6 +191,7 @@ export default function CartScreen({ navigation }) {
               comment: item.comment || '',
               alternativeLocationId: item.alternativeLocationId || '',
               promotedPrice: item.promotedPrice !== null ? item.promotedPrice : null,
+              locationId: item.locationId, 
             }));
             console.log('Corps envoyé à updateOrder:', { orderId, orderData: { products: updatedProducts } });
             await updateOrder(orderId, { products: updatedProducts });
@@ -237,28 +239,6 @@ export default function CartScreen({ navigation }) {
     }
   };
 
-  // const handleApplyPromo = async () => {
-  //   if (!orderId || !promoCode) {
-  //     Alert.alert('Erreur', 'Veuillez entrer un code promo et avoir un panier valide.');
-  //     return;
-  //   }
-  //   try {
-  //     const response = await applyPromotion(promoCode, orderId);
-  //     setPromoApplied(response.promotion);
-  //     Alert.alert(
-  //       'Succès',
-  //       `Promotion ${promoCode} appliquée avec succès ! Réduction de ${response.promotion.discountValue}${
-  //         response.promotion.discountType === 'percentage' ? '%' : ' FCFA'
-  //       }`
-  //     );
-  //     setPromoCode('');
-  //     await fetchCart();
-  //   } catch (err) {
-  //     console.log('Erreur dans handleApplyPromo:', err.message);
-  //     Alert.alert('Erreur', err.message || 'Code promo invalide ou erreur d\'application');
-  //   }
-  // };
-
   const handleRedeemPoints = async () => {
     if (!orderId || usedPoints <= 0 || usedPoints > loyaltyPoints) {
       Alert.alert('Erreur', 'Vérifiez vos points disponibles et entrez une valeur valide.');
@@ -285,7 +265,7 @@ export default function CartScreen({ navigation }) {
   };
 
   const renderCartItem = ({ item }) => {
-    const imageSource = imageMap[item.productId] || null;
+    const imageUrl = item.imageUrl || null;
     const isPromoted =
       item.promotedPrice !== null &&
       !isNaN(item.promotedPrice) &&
@@ -295,8 +275,13 @@ export default function CartScreen({ navigation }) {
     return (
       <View style={styles.cartItem}>
         <View style={styles.itemImageContainer}>
-          {imageSource ? (
-            <Image source={imageSource} style={styles.itemImage} resizeMode="contain" />
+          {imageUrl ? (
+            <Image 
+              source={{ uri: imageUrl }} 
+              style={styles.itemImage} 
+              resizeMode="contain" 
+              onError={(e) => console.log('Erreur image:', e.nativeEvent.error)} 
+            />
           ) : (
             <View style={styles.placeholderImage}>
               <Text style={styles.placeholderText}>Image à venir</Text>
@@ -367,18 +352,6 @@ export default function CartScreen({ navigation }) {
   const renderSummary = () => {
     return (
       <View style={styles.summaryContainer}>
-        {/* Commenté pour désactiver la fonctionnalité de code promo */}
-        {/* <View style={styles.promoContainer}>
-          <TextInput
-            style={styles.promoInput}
-            placeholder="Entrez un code promo"
-            value={promoCode}
-            onChangeText={setPromoCode}
-          />
-          <TouchableOpacity style={styles.promoButton} onPress={handleApplyPromo}>
-            <Text style={styles.promoButtonText}>Appliquer</Text>
-          </TouchableOpacity>
-        </View> */}
         <View style={styles.loyaltyContainer}>
           <Text style={styles.loyaltyText}>Points disponibles : {loyaltyPoints}</Text>
           <TextInput
@@ -533,11 +506,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 10,
+    backgroundColor: '#f9f9f9', 
+    borderRadius: 5,
   },
-  itemImage: { width: '100%', height: '100%' },
+  itemImage: { 
+    width: '100%', 
+    height: '100%' 
+  },
   placeholderImage: {
     width: '100%',
     height: '100%',
+    resizeMode: 'contain',
     backgroundColor: '#ccc',
     justifyContent: 'center',
     alignItems: 'center',
@@ -568,6 +547,9 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     paddingHorizontal: 6,
     paddingVertical: 2,
+    position: 'absolute',
+    top: 40,
+    left: 185,
   },
   promoBadgeText: {
     color: '#fff',
@@ -595,6 +577,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginTop: 10,
+    width: '100%',
+    flex: 1,
   },
   commentInput: {
     flex: 1,
@@ -619,31 +603,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#ddd',
     elevation: 2,
-  },
-  promoContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  promoInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 5,
-    padding: 8,
-    fontSize: 14,
-    marginRight: 10,
-  },
-  promoButton: {
-    backgroundColor: '#28a745',
-    padding: 10,
-    borderRadius: 5,
-    alignItems: 'center',
-  },
-  promoButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
   },
   loyaltyContainer: {
     flexDirection: 'row',

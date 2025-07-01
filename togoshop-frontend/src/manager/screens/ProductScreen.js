@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Switch, ScrollView, Alert, ActivityIndicator, Modal, FlatList, TouchableWithoutFeedback } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, Switch, ScrollView, Alert, ActivityIndicator, Modal, FlatList, TouchableWithoutFeedback, Image } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { apiRequest } from '../../shared/services/api';
+import { apiRequest, uploadProductImage } from '../../shared/services/api';
 
 export default function ProductScreen({ navigation }) {
   const [productData, setProductData] = useState({
@@ -21,7 +22,8 @@ export default function ProductScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [categoryModalVisible, setCategoryModalVisible] = useState(false);
-  const categories = ['Fruits', 'Légumes', 'vêtements', 'Électronique', 'Viandes', 'Produits Laitiers', 'Épicerie', 'Boissons', 'Autres', 'Céréales'];
+  const [image, setImage] = useState(null); // État pour l'image sélectionnée
+  const categories = ['Fruits', 'Légumes', 'Vêtements', 'Électronique', 'Viandes', 'Produits Laitiers', 'Épicerie', 'Boissons', 'Autres', 'Céréales'];
 
   // Charger les informations du manager
   useEffect(() => {
@@ -36,7 +38,6 @@ export default function ProductScreen({ navigation }) {
           return;
         }
 
-        // Récupérer les informations du manager
         const response = await apiRequest('/managers/me', { method: 'GET' });
         const managerSupermarketId = response.supermarketId._id ? response.supermarketId._id.toString() : null;
         const managerLocId = response.locationId || null;
@@ -51,7 +52,6 @@ export default function ProductScreen({ navigation }) {
         setSupermarketName(managerSupermarketName);
         setManagerLocationId(managerLocId);
 
-        // Préremplir stockByLocation avec le locationId du manager
         setProductData((prev) => ({
           ...prev,
           stockByLocation: [{ locationId: managerLocId, stock: '0' }],
@@ -78,14 +78,36 @@ export default function ProductScreen({ navigation }) {
     }));
   };
 
+  // Sélectionner une image
+  const selectImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission refusée', 'L\'accès à la galerie est nécessaire pour sélectionner une image.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [4, 3],
+      quality: 0.8,
+    });
+
+    if (!result.canceled) {
+      setImage(result.assets[0]);
+    } else {
+      console.log('Sélection d\'image annulée');
+    }
+  };
+
   // Créer le produit via l'API
+// Remplace la fonction createProduct dans ProductScreen.js
   const createProduct = async () => {
     if (!supermarketId || !managerLocationId) {
       Alert.alert('Erreur', 'Données du supermarché ou du site non disponibles.');
       return;
     }
 
-    // Validation des champs
     if (!productData.name.trim()) {
       Alert.alert('Erreur', 'Le nom du produit est requis.');
       return;
@@ -126,6 +148,17 @@ export default function ProductScreen({ navigation }) {
 
     setLoading(true);
     try {
+      let imageUrl = '';
+      if (image) {
+        const uploadResponse = await uploadProductImage(image);
+        if (uploadResponse && uploadResponse.imageUrl) {
+          imageUrl = uploadResponse.imageUrl; // Vérification explicite
+          console.log('Image URL générée:', imageUrl); // Débogage
+        } else {
+          throw new Error('Échec de l\'upload de l\'image ou URL manquante.');
+        }
+      }
+
       const productToCreate = {
         name: productData.name.trim(),
         description: productData.description.trim(),
@@ -135,9 +168,10 @@ export default function ProductScreen({ navigation }) {
         stockByLocation,
         weight: weightValue,
         isMadeInTogo: productData.isMadeInTogo,
-        imageUrl: productData.imageUrl.trim(),
+        imageUrl, // Assure que l'URL est bien incluse
       };
 
+      console.log('Données envoyées à createProduct:', productToCreate); // Débogage
       const response = await apiRequest('/products', {
         method: 'POST',
         body: productToCreate,
@@ -157,6 +191,7 @@ export default function ProductScreen({ navigation }) {
               isMadeInTogo: false,
               imageUrl: '',
             });
+            setImage(null);
           },
         },
       ]);
@@ -281,15 +316,14 @@ export default function ProductScreen({ navigation }) {
         />
       </View>
 
-      {/* URL de l'image */}
-      <Text style={styles.label}>URL de l'image</Text>
-      <TextInput
-        style={styles.input}
-        value={productData.imageUrl}
-        onChangeText={(value) => handleInputChange('imageUrl', value)}
-        placeholder="Exemple : https://example.com/image.jpg"
-        placeholderTextColor="#95a5a6"
-      />
+      {/* Sélection d'image */}
+      <Text style={styles.label}>Image du produit</Text>
+      <TouchableOpacity style={[styles.input, styles.imageButton]} onPress={selectImage}>
+        <Text style={styles.imageButtonText}>{image ? 'Image sélectionnée' : 'Sélectionner une image'}</Text>
+      </TouchableOpacity>
+      {image && (
+        <Image source={{ uri: image.uri }} style={styles.imagePreview} resizeMode="contain" />
+      )}
 
       {/* Bouton de Création */}
       <TouchableOpacity style={[styles.createButton, loading && styles.createButtonDisabled]} onPress={createProduct} disabled={loading}>
@@ -390,6 +424,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 15,
+  },
+  imageButton: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#3498db',
+  },
+  imageButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  imagePreview: {
+    width: '100%',
+    height: 200,
+    marginBottom: 15,
+    borderRadius: 8,
   },
   createButton: {
     flexDirection: 'row',

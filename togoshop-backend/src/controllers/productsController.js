@@ -1,11 +1,15 @@
 const Product = require('../models/Product');
 const Supermarket = require('../models/Supermarket');
 const mongoose = require('mongoose');
+const { v4: uuidv4 } = require('uuid');
+const { uploadFile, getSignedUrl } = require('../services/backblazeService');
+const multer = require('multer');
 
-// Ajouter un nouveau produit
+
+// Création de produit
 exports.createProduct = async (req, res) => {
   try {
-    // Vérifier les autorisations
+    // Vérifier les autorisations 
     if (!req.user.roles.includes('admin') && !(req.user.roles.includes('stock_manager') && req.user.supermarketId === req.body.supermarketId)) {
       return res.status(403).json({ message: 'Accès réservé à l’administrateur ou au gestionnaire de stock' });
     }
@@ -50,6 +54,18 @@ exports.createProduct = async (req, res) => {
       }
     }
 
+    let finalImageUrl = imageUrl || '';
+    let fileName = '';
+    if (req.file) {
+      fileName = `${uuidv4()}-${req.file.originalname}`;
+      finalImageUrl = await uploadFile(`products/${fileName}`, req.file.buffer, req.file.mimetype);
+      console.log('Image URL générée depuis fichier:', finalImageUrl);
+    } else if (!imageUrl) {
+      console.log('Aucune image fournie, imageUrl laissé vide.');
+    } else {
+      console.log('Utilisation de l\'imageUrl fourni:', imageUrl);
+    }
+
     const product = new Product({
       _id: new mongoose.Types.ObjectId().toString(),
       name,
@@ -60,7 +76,8 @@ exports.createProduct = async (req, res) => {
       stockByLocation,
       weight,
       isMadeInTogo: isMadeInTogo || false,
-      imageUrl,
+      imageUrl: finalImageUrl,
+      fileName,
     });
 
     await product.save();
@@ -72,7 +89,7 @@ exports.createProduct = async (req, res) => {
   }
 };
 
-// Récupérer les produits d’un supermarché
+// Récupération des produits par supermarché
 exports.getProductsBySupermarket = async (req, res) => {
   try {
     const { supermarketId } = req.params;
@@ -114,37 +131,75 @@ exports.getProductsBySupermarket = async (req, res) => {
         return res.status(400).json({ message: 'Site invalide pour ce supermarché' });
       }
 
-      const filteredProducts = products.map(product => {
-        const stockEntry = product.stockByLocation.find(stock => stock.locationId === locationId);
-        const updatedStock = stockEntry ? [stockEntry] : [{ locationId: locationId, stock: 0, _id: new mongoose.Types.ObjectId() }];
-        return { ...product.toObject(), stockByLocation: updatedStock };
-      });
+      const filteredProducts = await Promise.all(products.map(async product => {
+        try {
+          const stockEntry = product.stockByLocation.find(stock => stock.locationId === locationId);
+          const updatedStock = stockEntry ? [stockEntry] : [{ locationId: locationId, stock: 0, _id: new mongoose.Types.ObjectId() }];
+          
+          let finalImageUrl = product.imageUrl;
+          if (finalImageUrl) {
+            finalImageUrl = await getSignedUrl(finalImageUrl);
+            console.log(`URL régénérée pour ${product.name} dans getProductsBySupermarket:`, finalImageUrl);
+          }
+          return { ...product.toObject(), stockByLocation: updatedStock, imageUrl: finalImageUrl };
+        } catch (error) {
+          console.error(`Erreur de traitement pour ${product.name}:`, error.message);
+          return { ...product.toObject(), imageUrl: product.imageUrl };
+        }
+      }));
       console.log('Produits filtrés:', filteredProducts);
       return res.status(200).json(filteredProducts);
     }
 
-    res.status(200).json(products);
+    const productsWithSignedUrls = await Promise.all(products.map(async product => {
+      try {
+        let finalImageUrl = product.imageUrl;
+        if (finalImageUrl) {
+          finalImageUrl = await getSignedUrl(finalImageUrl); 
+          console.log(`URL régénérée pour ${product.name} dans getProductsBySupermarket:`, finalImageUrl);
+        }
+        return { ...product.toObject(), imageUrl: finalImageUrl };
+      } catch (error) {
+        console.error(`Erreur de traitement pour ${product.name}:`, error.message);
+        return { ...product.toObject(), imageUrl: product.imageUrl };
+      }
+    }));
+
+    res.status(200).json(productsWithSignedUrls);
   } catch (error) {
     console.error('Erreur dans getProductsBySupermarket:', error);
     res.status(500).json({ message: 'Erreur lors de la récupération des produits', error: error.message });
   }
 };
 
-// Récupérer un produit par ID
+// Récupération d'un produit par ID
 exports.getProductById = async (req, res) => {
   try {
     const { id } = req.params;
-    const product = await Product.findById(id);
+    const { locationId } = req.query;
+    let product = await Product.findById(id);
     if (!product) {
       return res.status(404).json({ message: 'Produit non trouvé' });
     }
+
+    if (product.imageUrl) {
+      product.imageUrl = await getSignedUrl(product.imageUrl);
+      console.log(`URL régénérée pour ${product.name} dans getProductById:`, product.imageUrl);
+    }
+
+    if (locationId) {
+      const stockEntry = product.stockByLocation.find(stock => stock.locationId === locationId);
+      product = product.toObject();
+      product.stockByLocation = stockEntry ? [stockEntry] : [{ locationId, stock: 0, _id: new mongoose.Types.ObjectId() }];
+    }
+
     res.status(200).json(product);
   } catch (error) {
     res.status(500).json({ message: 'Erreur lors de la récupération du produit', error: error.message });
   }
 };
 
-// Récupérer les substituts d’un produit
+// Récupérer les substituts d'un produit
 exports.getSubstitutes = async (req, res) => {
   try {
     const { category, supermarketId, locationId } = req.params;
@@ -173,7 +228,6 @@ exports.getSubstitutes = async (req, res) => {
       }
     }).lean();
 
-    // Réinitialiser promotedPrice si le supermarché est fermé
     if (supermarket.status !== 'open') {
       substitutes.forEach(sub => { sub.promotedPrice = null; });
     }
@@ -191,7 +245,7 @@ exports.updateProduct = async (req, res) => {
     const { id } = req.params;
     let { name, description, price, category, stockByLocation, weight, isMadeInTogo, imageUrl } = req.body;
 
-    console.log('Données brutes req.body:', req.body);
+    console.log('Données reçues:', req.body);
 
     const product = await Product.findById(id);
     if (!product) {
@@ -230,34 +284,45 @@ exports.updateProduct = async (req, res) => {
     if (imageUrl) product.imageUrl = imageUrl;
 
     if (stockByLocation) {
-      console.log('stockByLocation brut:', stockByLocation);
-      stockByLocation = typeof stockByLocation === 'string' ? JSON.parse(stockByLocation) : stockByLocation;
-      console.log('stockByLocation après parsing:', stockByLocation);
-
-      if (!Array.isArray(stockByLocation)) {
-        return res.status(400).json({ message: 'stockByLocation doit être un tableau' });
-      }
-
-      for (const stock of stockByLocation) {
-        console.log('Entrée stock:', stock);
-        if (!stock.locationId || typeof stock.stock !== 'number' || stock.stock < 0) {
-          return res.status(400).json({ message: 'Format de stock invalide : locationId et stock (nombre positif) requis' });
+      try {
+        if (typeof stockByLocation === 'string') {
+          stockByLocation = JSON.parse(stockByLocation);
         }
-        const locationExists = (supermarketObj.locations || []).some(loc => {
-          const locId = loc._id instanceof mongoose.Types.ObjectId ? loc._id.toString() : loc._id.toString();
-          return locId === stock.locationId;
-        });
-        if (!locationExists) {
-          return res.status(400).json({ message: `Site ${stock.locationId} invalide pour ce supermarché` });
+        
+        if (!Array.isArray(stockByLocation)) {
+          stockByLocation = [stockByLocation];
         }
 
-        const stockIndex = product.stockByLocation.findIndex(s => s.locationId === stock.locationId);
-        console.log('Index trouvé:', stockIndex, 'Stock actuel:', product.stockByLocation);
-        if (stockIndex !== -1) {
-          product.stockByLocation[stockIndex].stock = stock.stock;
-        } else {
-          product.stockByLocation.push({ locationId: stock.locationId, stock: stock.stock });
+        for (const stock of stockByLocation) {
+          console.log('Entrée stock:', stock);
+          if (!stock.locationId || typeof stock.stock !== 'number' || stock.stock < 0) {
+            return res.status(400).json({ message: 'Format de stock invalide : locationId et stock (nombre positif) requis' });
+          }
+          
+          const locationExists = (supermarketObj.locations || []).some(loc => {
+            const locId = loc._id instanceof mongoose.Types.ObjectId ? loc._id.toString() : loc._id.toString();
+            return locId === stock.locationId;
+          });
+          
+          if (!locationExists) {
+            return res.status(400).json({ message: `Site ${stock.locationId} invalide pour ce supermarché` });
+          }
+
+          const stockIndex = product.stockByLocation.findIndex(s => s.locationId === stock.locationId);
+          console.log('Index trouvé:', stockIndex, 'Stock actuel:', product.stockByLocation);
+          
+          if (stockIndex !== -1) {
+            product.stockByLocation[stockIndex].stock = stock.stock;
+          } else {
+            product.stockByLocation.push({ 
+              locationId: stock.locationId, 
+              stock: stock.stock 
+            });
+          }
         }
+      } catch (parseError) {
+        console.error('Erreur de parsing stockByLocation:', parseError);
+        return res.status(400).json({ message: 'Format de stock invalide' });
       }
     }
 

@@ -12,6 +12,14 @@ export const AppProvider = ({ children }) => {
   const [loadingCart, setLoadingCart] = useState(true);
   const [error, setError] = useState(null);
   const [isFetchingCart, setIsFetchingCart] = useState(false);
+  const [supermarkets, setSupermarkets] = useState([]);
+  const [selectedSupermarket, setSelectedSupermarket] = useState(null);
+  const [locations, setLocations] = useState([]);
+  const [selectedLocationId, setSelectedLocationId] = useState(null);
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [supermarketStatus, setSupermarketStatus] = useState(null);
+  const [shouldRefreshData, setShouldRefreshData] = useState(false);
 
   useEffect(() => {
     const loadAuth = async () => {
@@ -21,23 +29,16 @@ export const AppProvider = ({ children }) => {
         try {
           const parsedUser = JSON.parse(storedUser);
           setUser(parsedUser);
-          console.log('User défini dans loadAuth:', parsedUser);
         } catch (error) {
           if (error.message === 'jwt expired') {
             await AsyncStorage.removeItem('token');
             await AsyncStorage.removeItem('user');
-            console.log('Token expiré, utilisateur déconnecté');
             setUser(null);
             setCart([]);
           } else {
             setError(error.message);
-            console.log('Erreur dans loadAuth:', error.message);
           }
         }
-      } else if (token) {
-        await refreshData();
-      } else {
-        console.log('Aucun token ou utilisateur trouvé dans AsyncStorage');
       }
       setLoadingCart(false);
     };
@@ -48,7 +49,6 @@ export const AppProvider = ({ children }) => {
     if (user && user.role === 'client') {
       fetchCart();
     } else if (user) {
-      console.log('fetchCart ignoré pour le rôle:', user.role);
       setCart([]);
       setLoadingCart(false);
     }
@@ -56,65 +56,42 @@ export const AppProvider = ({ children }) => {
 
   const fetchCart = useCallback(async () => {
     if (!user || user.role !== 'client') {
-      console.log('fetchCart ignoré, rôle non client:', user?.role);
       setLoadingCart(false);
       return { orderId: null, cart: [] };
     }
-    if (isFetchingCart) {
-      console.log('fetchCart déjà en cours, appel ignoré');
-      return { orderId: null, cart: [] };
-    }
+    if (isFetchingCart) return { orderId: null, cart: [] };
     try {
       setIsFetchingCart(true);
       setLoadingCart(true);
-      console.log('Appel de fetchCart avec user:', user);
-
-      const token = await AsyncStorage.getItem('token');
-      const tokenData = JSON.parse(atob(token.split('.')[1]));
-      const currentTime = Math.floor(Date.now() / 1000);
-      if (tokenData.exp < currentTime) {
-        console.log('Token expiré dans fetchCart, déconnexion');
-        await AsyncStorage.removeItem('token');
-        await AsyncStorage.removeItem('user');
-        setUser(null);
-        setCart([]);
-        setError('Session expirée, veuillez vous reconnecter');
-        return { orderId: null, cart: [] };
-      }
-
       const response = await getUserCart();
-      console.log('Réponse getUserCart dans fetchCart:', JSON.stringify(response, null, 2));
-
       let products = [];
-      if (response && response.products && Array.isArray(response.products)) {
+      if (response && Array.isArray(response.products)) {
         products = response.products;
-      } else {
-        console.log('Aucun produit dans le panier ou réponse invalide:', response);
-        setCart([]);
-        return { orderId: null, cart: [] };
+      } else if (response && Array.isArray(response)) {
+        products = response;
       }
-
       const mappedCart = products.map(item => ({
-        productId: item.productId || '',
-        name: item.name || 'Produit inconnu',
-        price: Number(item.price) || 0,
-        weight: Number(item.weight) || 0,
+        productId: item.productId?._id || item.productId || '',
+        name: item.productId?.name || item.name || 'Produit inconnu',
+        price: Number(item.productId?.price) || Number(item.price) || 0,
+        weight: Number(item.productId?.weight) || Number(item.weight) || 0,
         quantity: Number(item.quantity) || 1,
         comment: item.comment || '',
         alternativeLocationId: item.alternativeLocationId || '',
-        stockByLocation: item.stockByLocation || [],
-        promotedPrice: item.promotedPrice !== null && !isNaN(item.promotedPrice) ? Number(item.promotedPrice) : null,
+        stockByLocation: item.productId?.stockByLocation || item.stockByLocation || [],
+        imageUrl: item.productId?.imageUrl || item.imageUrl || 'https://via.placeholder.com/150',
+        promotedPrice: (item.promotedPrice !== null && !isNaN(item.promotedPrice)) 
+          ? Number(item.promotedPrice) 
+          : (item.productId?.promotedPrice !== null && !isNaN(item.productId?.promotedPrice))
+            ? Number(item.productId?.promotedPrice)
+            : null,
       }));
-
-      console.log('Cart normalisé:', JSON.stringify(mappedCart, null, 2));
       setCart(mappedCart);
-      console.log('Cart mis à jour dans l\'état:', JSON.stringify(mappedCart, null, 2));
       setError(null);
-      return { orderId: response.orderId, cart: mappedCart };
+      return { orderId: response.orderId || (response.length > 0 ? response[0].orderId : null), cart: mappedCart };
     } catch (error) {
       console.error('Erreur détaillée lors du chargement du panier:', error.message);
       if (error.message === 'jwt expired') {
-        console.log('Token expiré dans fetchCart, déconnexion');
         await AsyncStorage.removeItem('token');
         await AsyncStorage.removeItem('user');
         setUser(null);
@@ -131,16 +108,13 @@ export const AppProvider = ({ children }) => {
   }, [user]);
 
   const refreshData = useCallback(async () => {
-    console.log('Appel de refreshData');
     const token = await AsyncStorage.getItem('token');
     if (token) {
       try {
         const userData = await getManagerInfo();
         await AsyncStorage.setItem('user', JSON.stringify(userData));
         setUser(userData);
-        console.log('User mis à jour dans refreshData:', userData);
       } catch (error) {
-        console.error('Erreur dans refreshData:', error.message);
         if (error.message === 'jwt expired') {
           await AsyncStorage.removeItem('token');
           await AsyncStorage.removeItem('user');
@@ -152,52 +126,81 @@ export const AppProvider = ({ children }) => {
     }
   }, []);
 
-  const refreshCart = useCallback(async () => {
-    console.log('Appel de refreshCart');
-    const result = await fetchCart();
-    return result.cart;
-  }, [fetchCart]);
-
-  const updateLocalCart = useCallback((updatedCart) => {
-    console.log('Mise à jour locale du panier:', updatedCart);
-    setCart(updatedCart);
-  }, []);
-
-  const addToCart = async (product) => {
+  const addToCart = useCallback(async (product) => {
     if (!user || !product._id || !product.supermarketId || !product.locationId) {
       const errorMessage = 'Impossible d’ajouter le produit : utilisateur ou données manquantes.';
-      console.log(errorMessage, { user, product });
       setError(errorMessage);
       Alert.alert('Erreur', errorMessage);
       return { success: false, error: errorMessage };
     }
-    console.log('Produit reçu dans addToCart:', product);
-    const cartItem = {
-      productId: product._id,
-      quantity: 1,
-      locationId: product.locationId,
-      supermarketId: product.supermarketId,
-      promotedPrice: product.promotedPrice || null,
-    };
-    try {
-      console.log('Ajout au panier, cartItem envoyé:', cartItem);
-      const response = await addToCartAPI(cartItem);
-      console.log('Réponse addToCartAPI:', response);
-      const fetchResult = await fetchCart();
-      if (fetchResult.cart) {
-        console.log('Panier mis à jour avec succès après ajout');
+
+    // Mise à jour locale optimiste
+    setCart(prevCart => {
+      const existingItem = prevCart.find(item => item.productId === product._id);
+      
+      if (existingItem) {
+        return prevCart.map(item => 
+          item.productId === product._id 
+            ? { ...item, quantity: item.quantity + 1 } 
+            : item
+        );
       } else {
-        console.warn('Échec de la mise à jour du panier après ajout');
+        return [
+          ...prevCart,
+          {
+            productId: product._id,
+            name: product.name,
+            price: product.price,
+            weight: product.weight,
+            quantity: 1,
+            imageUrl: product.imageUrl,
+            promotedPrice: product.promotedPrice,
+            stockByLocation: product.stockByLocation,
+            locationId: product.locationId,
+            supermarketId: product.supermarketId,
+          }
+        ];
       }
+    });
+
+    try {
+      const cartItem = {
+        productId: product._id,
+        quantity: 1,
+        locationId: product.locationId,
+        supermarketId: product.supermarketId,
+        promotedPrice: product.promotedPrice || null,
+      };
+      
+      await addToCartAPI(cartItem);
+      await fetchCart(); // Synchronisation avec le serveur
+      
       setError(null);
       return { success: true };
     } catch (error) {
-      console.error('Erreur ajout panier:', error.message);
+      // Annuler la mise à jour locale en cas d'erreur
+      setCart(prevCart => {
+        const existingItem = prevCart.find(item => item.productId === product._id);
+        if (existingItem) {
+          if (existingItem.quantity > 1) {
+            return prevCart.map(item => 
+              item.productId === product._id 
+                ? { ...item, quantity: item.quantity - 1 } 
+                : item
+            );
+          } else {
+            return prevCart.filter(item => item.productId !== product._id);
+          }
+        } else {
+          return prevCart;
+        }
+      });
+      
       setError(error.message);
       Alert.alert('Erreur', error.message || 'Impossible d’ajouter le produit.');
       return { success: false, error: error.message };
     }
-  };
+  }, [user, fetchCart]);
 
   const removeFromCart = (productId) => setCart(prev => prev.filter(item => item.productId !== productId));
   const updateCartQuantity = (productId, quantity) =>
@@ -211,16 +214,11 @@ export const AppProvider = ({ children }) => {
   const updateCartPhoto = (productId, photoUrl) =>
     setCart(prev => prev.map(item => (item.productId === productId ? { ...item, photoUrl } : item)));
 
-  const setCartFromAPI = (newCart) => {
-    setCart(newCart);
-  };
-
   return (
     <AppContext.Provider
       value={{
         cart,
         setCart,
-        setCartFromAPI,
         addToCart,
         removeFromCart,
         updateCartQuantity,
@@ -232,10 +230,25 @@ export const AppProvider = ({ children }) => {
         setPromotions,
         loadingCart,
         error,
+        setError,
         fetchCart,
+        shouldRefreshData,
+        setShouldRefreshData,
+        supermarkets,
+        setSupermarkets,
+        selectedSupermarket,
+        setSelectedSupermarket,
+        locations,
+        setLocations,
+        selectedLocationId,
+        setSelectedLocationId,
+        products,
+        setProducts,
+        loading,
+        setLoading,
+        supermarketStatus,
+        setSupermarketStatus,
         refreshData,
-        refreshCart,
-        updateLocalCart,
       }}
     >
       {children}

@@ -44,7 +44,7 @@ exports.updateUserProfile = async (req, res) => {
     await user.save();
 
     const updatedUser = user.toObject();
-    delete updatedUser.password; // Exclure le mot de passe de la réponse
+    delete updatedUser.password; 
 
     res.status(200).json({ message: 'Profil mis à jour avec succès', user: updatedUser });
   } catch (error) {

@@ -1,31 +1,46 @@
-import React, { useState, useContext } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import React, { useState, useContext, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ImageBackground, Animated } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { apiRequest } from '../../shared/services/api';
 import { AppContext } from '../../shared/context/AppContext';
+import { Ionicons } from '@expo/vector-icons';
+import * as Animatable from 'react-native-animatable'; 
 
 export default function LoginScreen({ navigation }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [loading, setLoading] = useState(false);
   const { refreshData } = useContext(AppContext);
+  const fadeAnim = useState(new Animated.Value(0))[0];
+
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 1000,
+      useNativeDriver: true,
+    }).start();
+  }, [fadeAnim]);
 
   const handleLogin = async () => {
+    const normalizedName = name.trim();
+    const normalizedPhone = phoneNumber.trim();
+    if (!normalizedName || !normalizedPhone) {
+      Alert.alert('Erreur', 'Nom et numéro de téléphone sont requis.');
+      return;
+    }
     try {
       setLoading(true);
       const response = await apiRequest('/auth/login', {
         method: 'POST',
-        body: { email, password, role: 'manager' },
+        body: { name: normalizedName, phone: normalizedPhone, role: 'manager' }
       });
-      const { token, user } = response; // Supposant que l'API renvoie { token, user }
+      const { token, user } = response;
       console.log('Token et user reçus:', { token, user });
 
-      // Stocker le token et l'utilisateur dans AsyncStorage
       await AsyncStorage.setItem('token', token);
       await AsyncStorage.setItem('user', JSON.stringify(user));
       console.log('Token et user stockés dans AsyncStorage');
 
-      // Rafraîchir les données dans AppContext
       if (refreshData) await refreshData();
 
       Alert.alert('Succès', 'Connexion réussie !');
@@ -39,38 +54,133 @@ export default function LoginScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Connexion Manager</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        value={email}
-        onChangeText={setEmail}
-        keyboardType="email-address"
-        autoCapitalize="none"
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Mot de passe"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-      />
-      <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
-        <Text style={styles.buttonText}>{loading ? 'Chargement...' : 'Se Connecter'}</Text>
-      </TouchableOpacity>
-      <TouchableOpacity onPress={() => navigation.navigate('Register')}>
-        <Text style={styles.link}>Créer un compte</Text>
-      </TouchableOpacity>
-    </View>
+    <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
+      <ImageBackground
+        source={{ uri: 'https://plus.unsplash.com/premium_vector-1727427083319-e0928962350b?q=80&w=880&auto=format&fit=crop&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D' }} // Magasin moderne
+        style={styles.background}
+        imageStyle={styles.backgroundImage}
+      >
+        <View style={styles.overlay}>
+          <Animatable.View animation="fadeInUp" duration={1200} style={styles.content}>
+            <Text style={styles.title}>Connexion Manager</Text>
+            <View style={styles.inputWrapper}>
+              <Ionicons name="person-outline" size={22} color="#a0aec0" style={styles.icon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Nom"
+                value={name}
+                onChangeText={setName}
+                autoCapitalize="words"
+                placeholderTextColor="#a0aec0"
+              />
+            </View>
+            <View style={styles.inputWrapper}>
+              <Ionicons name="call-outline" size={22} color="#a0aec0" style={styles.icon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Numéro de téléphone"
+                value={phoneNumber}
+                onChangeText={setPhoneNumber}
+                keyboardType="phone-pad"
+                placeholderTextColor="#a0aec0"
+              />
+            </View>
+            <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
+              {loading ? (
+                <Ionicons name="reload-circle" size={24} color="#fff" />
+              ) : (
+                <Text style={styles.buttonText}>Se Connecter</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate('Register')}>
+              <Text style={styles.link}>Créer un compte <Ionicons name="arrow-forward-outline" size={18} color="#63b3ed" /></Text>
+            </TouchableOpacity>
+          </Animatable.View>
+        </View>
+      </ImageBackground>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 20, backgroundColor: '#f5f5f5' },
-  title: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 20 },
-  input: { borderWidth: 1, borderColor: '#ddd', padding: 10, borderRadius: 5, marginBottom: 10 },
-  button: { backgroundColor: '#2c3e50', padding: 15, borderRadius: 5, alignItems: 'center' },
-  buttonText: { color: '#fff', fontSize: 16 },
-  link: { color: '#2c3e50', textAlign: 'center', marginTop: 10 },
+  container: {
+    flex: 1,
+  },
+  background: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+  },
+  backgroundImage: {
+    opacity: 0.4,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(28, 18, 18, 0.2)', // Overlay léger
+    justifyContent: 'center',
+    padding: 20,
+  },
+  content: {
+    backgroundColor: 'rgba(84, 74, 104, 0.63)', // Fond semi-transparent
+    borderRadius: 20,
+    padding: 30,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 15,
+    elevation: 12,
+  },
+  title: {
+    fontSize: 38,
+    fontWeight: '900',
+    textAlign: 'center',
+    marginBottom: 40,
+    color: '#ffffff',
+    textTransform: 'uppercase',
+    letterSpacing: 2,
+    textShadowColor: 'rgba(0, 0, 0, 0.37)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 5,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 15,
+    marginBottom: 20,
+    paddingHorizontal: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  icon: {
+    marginRight: 12,
+  },
+  input: {
+    flex: 1,
+    fontSize: 16,
+    color: '#ffffff',
+    paddingVertical: 12,
+  },
+  button: {
+    backgroundColor: '#63b3ed', // Bleu cohérent avec l’écran suivant
+    paddingVertical: 18,
+    borderRadius: 15,
+    alignItems: 'center',
+    marginTop: 20,
+    elevation: 8,
+    backgroundImage: 'linear-gradient(135deg,rgb(138, 192, 231), #4dabf7)', // Dégradé bleu
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  link: {
+    color: '#63b3ed',
+    textAlign: 'center',
+    marginTop: 25,
+    fontSize: 16,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
 });

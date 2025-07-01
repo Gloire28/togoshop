@@ -15,14 +15,23 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.togoshop.frontend",
-      "infoPlist": { "NSLocationWhenInUseUsageDescription": "Nous avons besoin de votre position pour afficher votre adresse de livraison sur la carte."}
+      "infoPlist": { 
+        "NSLocationWhenInUseUsageDescription": "Nous avons besoin de votre position pour afficher votre adresse de livraison sur la carte.",
+        "NSPhotoLibraryUsageDescription": "L'application a besoin d'accéder à votre galerie pour sélectionner des images de produits."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "READ_MEDIA_IMAGES"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png",

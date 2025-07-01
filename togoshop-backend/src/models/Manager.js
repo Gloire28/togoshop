@@ -6,6 +6,12 @@ const managerSchema = new mongoose.Schema({
     type: String,
     required: true,
     trim: true,
+    set: value => value.trim(),
+  },
+  phone: {
+    type: String,
+    required: true,
+    trim: true,
   },
   email: {
     type: String,

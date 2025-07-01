@@ -135,8 +135,12 @@ export default function StockScreen({ navigation }) {
         Alert.alert('Erreur', 'La quantité doit être un nombre positif');
         return;
       }
-      console.log('Envoi de stockByLocation:', [{ locationId: managerInfo.locationId, stock }]);
-      formData.append('stockByLocation', JSON.stringify([{ locationId: managerInfo.locationId, stock }]));
+      const stockUpdate = {
+        locationId: managerInfo.locationId,
+        stock: stock,
+      };
+      console.log('Envoi de stockByLocation:', [stockUpdate]);
+      formData.append('stockByLocation', JSON.stringify([stockUpdate]));
     }
 
     try {

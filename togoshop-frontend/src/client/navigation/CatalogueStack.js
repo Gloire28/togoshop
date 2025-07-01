@@ -1,41 +1,18 @@
+// src/client/navigation/CatalogueStack.js
 import React from 'react';
 import { createStackNavigator } from '@react-navigation/stack';
+import SupermarketScreen from '../screens/SupermarketScreen';
+import SitesScreen from '../screens/SitesScreen';
 import CatalogueScreen from '../screens/CatalogueScreen';
-import ProductDetailScreen from '../screens/ProductDetailScreen';
-import CartScreen from '../screens/CartScreen';
-import PaymentScreen from '../screens/PaymentScreen';
-import TrackingScreen from '../screens/TrackingScreen';
 
 const Stack = createStackNavigator();
 
 export default function CatalogueStack() {
   return (
-    <Stack.Navigator>
-      <Stack.Screen
-        name="CatalogueMain"
-        component={CatalogueScreen}
-        options={{ title: 'Catalogue' }}
-      />
-      <Stack.Screen
-        name="ProductDetail"
-        component={ProductDetailScreen}
-        options={{ title: 'Détails du Produit' }}
-      />
-      <Stack.Screen
-        name="Cart"
-        component={CartScreen}
-        options={{ title: 'Panier' }}
-      />
-      <Stack.Screen
-        name="Payment"
-        component={PaymentScreen}
-        options={{ title: 'Paiement' }}
-      />
-      <Stack.Screen
-        name="Tracking"
-        component={TrackingScreen}
-        options={{ title: 'Suivi Livraison' }}
-      />
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="Supermarket" component={SupermarketScreen} />
+      <Stack.Screen name="Sites" component={SitesScreen} />
+      <Stack.Screen name="Catalogue" component={CatalogueScreen} />
     </Stack.Navigator>
   );
 }

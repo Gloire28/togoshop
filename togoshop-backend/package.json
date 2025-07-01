@@ -4,17 +4,26 @@
     "main": "server.js",
     "scripts": {
         "start": "node src/server.js",
-        "dev": "nodemon server.js"
+        "dev": "nodemon --watch src src/server.js"
     },
     "dependencies": {
+        "@aws-sdk/client-s3": "^3.832.0",
+        "@aws-sdk/middleware-sdk-s3": "^3.826.0",
+        "@aws-sdk/s3-request-presigner": "^3.832.0",
         "axios": "^1.8.4",
+        "backblaze-b2": "^1.7.1",
         "bcrypt": "^5.1.1",
+        "bull": "^4.16.5",
         "cors": "^2.8.5",
         "dotenv": "^16.4.5",
         "express": "^4.21.0",
+        "ioredis": "^5.6.1",
         "jsonwebtoken": "^9.0.2",
         "mongoose": "^8.7.0",
-        "multer": "^2.0.0"
+        "multer": "^2.0.0",
+        "node-cron": "^4.1.1",
+        "type": "commonjs",
+        "uuid": "^9.0.1"
     },
     "devDependencies": {
         "nodemon": "^3.1.7"

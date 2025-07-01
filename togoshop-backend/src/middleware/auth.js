@@ -91,6 +91,7 @@ const permissions = [
   { path: '/:id', method: 'PUT', baseUrl: '/api/products', roles: ['admin', 'stock_manager'] },
   { path: '/', method: 'POST', baseUrl: '/api/products', roles: ['admin', 'stock_manager'] },
   { path: '/:id', method: 'DELETE', baseUrl: '/api/products', roles: ['admin', 'stock_manager'] },
+  { path: '/upload-image', method: 'POST', baseUrl: '/api/products', roles: ['admin', 'stock_manager'] },
   { path: '/', method: 'POST', baseUrl: '/api/orders', roles: ['client'] },
   { path: '/user/me', method: 'GET', baseUrl: '/api/orders', roles: ['client'] },
   { path: '/user/history', method: 'GET', baseUrl: '/api/orders', roles: ['client'] },
@@ -171,7 +172,6 @@ const permissions = [
   },
 ];
 
-// Fonction pour obtenir une description claire de l'action demandée
 // Fonction pour obtenir une description claire de l'action demandée
 const getActionDescription = (method, baseUrl, path) => {
   if (baseUrl === '/api/managers') {
