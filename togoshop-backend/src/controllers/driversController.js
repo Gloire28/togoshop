@@ -1,9 +1,9 @@
 const Driver = require('../models/Driver');
-const Order = require('../models/Order'); // Ajouté pour les requêtes sur Order
+const Order = require('../models/Order'); 
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const { sendNotification } = require('../services/notifications'); // Ajouté pour les notifications
-const { groupOrders } = require('../services/optimizer'); // Ajouté pour le groupage
+const { sendNotification } = require('../services/notifications'); 
+const { groupOrders } = require('../services/optimizer'); 
 const { GroupOrders } = require('../services/optimizer');
 const loyaltyController = require('./loyaltyController');
 const { roundToTwoDecimals } = require('../services/numberUtils');

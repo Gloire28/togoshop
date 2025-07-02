@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, ActivityIndicator, Alert, Switch, TouchableOpacity, Image, Modal, Animated } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, Alert, Switch, TouchableOpacity, Image, Animated } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
 import { apiRequest, getManagerInfo, getManagerOrders } from '../../shared/services/api';
@@ -10,9 +10,7 @@ export default function OrderScreen() {
   const [loading, setLoading] = useState(false);
   const [token, setToken] = useState(null);
   const [checkedProducts, setCheckedProducts] = useState({});
-  const [fadeAnim] = useState(new Animated.Value(0)); // Animation pour nouvelle commande
-  const [modalVisible, setModalVisible] = useState(false);
-  const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
   const navigation = useNavigation();
 
   useEffect(() => {
@@ -48,10 +46,9 @@ export default function OrderScreen() {
     setLoading(true);
     try {
       const response = await getManagerOrders();
-      // Filtrer uniquement les commandes pertinentes pour le manager
       const filteredOrders = (response.orders || [])
         .filter(order => ['awaiting_validator', 'pending_validation'].includes(order.status))
-        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); // Trier par date (plus ancienne d'abord)
+        .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
       setOrders(filteredOrders);
       const initialChecked = filteredOrders.reduce((acc, order) => ({
         ...acc,
@@ -61,7 +58,6 @@ export default function OrderScreen() {
         }), {}),
       }), {});
       setCheckedProducts(initialChecked);
-      // Lancer l'animation pour la nouvelle commande
       Animated.timing(fadeAnim, {
         toValue: 1,
         duration: 500,
@@ -98,30 +94,22 @@ export default function OrderScreen() {
     }));
   };
 
-  const updateOrderStatus = async (orderId, status, reason = null) => {
+  const updateOrderStatus = async (orderId, status) => {
     try {
-      const body = { status };
-      if (reason) body.reason = reason; // Ajouter la raison si fournie
       const response = await apiRequest(`/orders/${orderId}/status`, {
         method: 'PUT',
-        body,
+        body: { status },
       });
       Alert.alert('Succès', response.message);
-      setModalVisible(false); // Fermer la modale si ouverte
-      fetchOrders(); // Recharger les commandes
+      fetchOrders();
     } catch (error) {
       Alert.alert('Erreur', error.message || 'Impossible de mettre à jour le statut');
     }
   };
 
-  const handleReturnToPending = (orderId) => {
-    setSelectedOrderId(orderId);
-    setModalVisible(true);
-  };
-
   const renderProduct = ({ item, orderId }) => {
     const isChecked = checkedProducts[orderId]?.[item._id] || false;
-    const imageUrl = item.productId?.imageUrl || 'https://via.placeholder.com/150'; // Utiliser imageUrl du produit avec fallback
+    const imageUrl = item.productId?.imageUrl || 'https://via.placeholder.com/150';
 
     return (
       <View style={[styles.productCard, isChecked ? styles.productCardChecked : null]}>
@@ -156,7 +144,7 @@ export default function OrderScreen() {
       return <Text style={styles.noOrders}>Aucune commande à traiter</Text>;
     }
 
-    const currentOrder = orders[0]; // Prendre la commande la plus ancienne
+    const currentOrder = orders[0];
     const checkedCount = Object.values(checkedProducts[currentOrder._id] || {}).filter(Boolean).length;
     const totalProducts = currentOrder.products.length;
     const allChecked = checkedCount === totalProducts;
@@ -182,14 +170,6 @@ export default function OrderScreen() {
           >
             <Text style={styles.actionButtonText}>Valider</Text>
           </TouchableOpacity>
-          {currentOrder.status === 'pending_validation' && (
-            <TouchableOpacity
-              style={[styles.actionButton, { backgroundColor: '#f1c40f' }]}
-              onPress={() => handleReturnToPending(currentOrder._id)}
-            >
-              <Text style={styles.actionButtonText}>Hold</Text>
-            </TouchableOpacity>
-          )}
           <TouchableOpacity
             style={[styles.actionButton, { backgroundColor: '#dc3545' }]}
             onPress={() => updateOrderStatus(currentOrder._id, 'cancelled')}
@@ -227,42 +207,6 @@ export default function OrderScreen() {
       {loading ? (
         <ActivityIndicator size="large" color="#007bff" />
       ) : renderOrder()}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Pourquoi remettre en attente ?</Text>
-            <TouchableOpacity
-              style={styles.modalButton}
-              onPress={() => updateOrderStatus(selectedOrderId, 'awaiting_validator', 'Problème de stock')}
-            >
-              <Text style={styles.modalButtonText}>Problème de stock</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.modalButton}
-              onPress={() => updateOrderStatus(selectedOrderId, 'awaiting_validator', 'Client injoignable')}
-            >
-              <Text style={styles.modalButtonText}>Client injoignable</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.modalButton}
-              onPress={() => updateOrderStatus(selectedOrderId, 'awaiting_validator', 'Erreur dans la commande')}
-            >
-              <Text style={styles.modalButtonText}>Erreur dans la commande</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.modalButton, { backgroundColor: '#dc3545' }]}
-              onPress={() => setModalVisible(false)}
-            >
-              <Text style={styles.modalButtonText}>Annuler</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -333,7 +277,7 @@ const styles = StyleSheet.create({
   },
   productList: {
     marginBottom: 15,
-    maxHeight: 300, // Limiter la hauteur pour éviter un scroll excessif
+    maxHeight: 300,
   },
   productSeparator: {
     height: 1,
@@ -424,38 +368,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#7f8c8d',
     marginTop: 20,
-  },
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  modalContent: {
-    backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 10,
-    width: '80%',
-    alignItems: 'center',
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 15,
-    color: '#2c3e50',
-  },
-  modalButton: {
-    backgroundColor: '#3498db',
-    paddingVertical: 10,
-    paddingHorizontal: 15,
-    borderRadius: 8,
-    marginVertical: 5,
-    width: '100%',
-    alignItems: 'center',
-  },
-  modalButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
   },
 });

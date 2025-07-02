@@ -187,6 +187,40 @@ const permissions = [
       return req.user.supermarketId === promotion.supermarketId.toString();
     }
   },
+
+  // Notifications
+  { 
+    path: 'subscribe', 
+    method: 'POST', 
+    baseUrl: '/api/notifications', 
+    roles: ['client'] 
+  },
+  { 
+    path: '', 
+    method: 'GET', 
+    baseUrl: '/api/notifications', 
+    roles: ['client'] 
+  },
+  { 
+    path: ':id/read', 
+    method: 'PATCH', 
+    baseUrl: '/api/notifications', 
+    roles: ['client'] 
+  },
+  { 
+    path: ':id', 
+    method: 'DELETE', 
+    baseUrl: '/api/notifications', 
+    roles: ['client'] 
+  },
+
+// Création de notifications (admin)
+  { 
+    path: '', 
+    method: 'POST', 
+    baseUrl: '/api/notifications', 
+    roles: ['admin', 'manager'] 
+  },
 ];
 
 // Fonction pour obtenir une description claire de l'action demandée
@@ -249,6 +283,13 @@ const getActionDescription = (method, baseUrl, path) => {
     if (path.match(/^[0-9a-fA-F]{24}\/status$/) && method === 'GET') return 'Récupération de l\'état du supermarché';
     if (path.match(/^[0-9a-fA-F]{24}$/) && method === 'GET') return 'Récupération des détails d\'un supermarché';
   }
+  if (baseUrl === '/api/notifications') {
+  if (path === 'subscribe' && method === 'POST') return 'Abonnement à une notification';
+  if (path === '' && method === 'GET') return 'Récupération des notifications';
+  if (path.match(/^[0-9a-fA-F]{24}\/read$/) && method === 'PATCH') return 'Marquer une notification comme lue';
+  if (path.match(/^[0-9a-fA-F]{24}$/) && method === 'DELETE') return 'Suppression d\'une notification';
+  if (method === 'POST' && path === '') return 'Création d\'une notification (admin)';
+  }
   return 'Action inconnue';
 };
 
@@ -263,6 +304,7 @@ const getSectionDescription = (baseUrl) => {
   if (baseUrl === '/api/loyalty') return 'Section de fidélité';
   if (baseUrl === '/api/promotions') return 'Section des promotions';
   if (baseUrl === '/api/users') return 'Section des utilisateurs';
+  if (baseUrl === '/api/notifications') return 'Section des notifications';
   return 'Section inconnue';
 };
 

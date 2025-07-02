@@ -315,3 +315,40 @@ export const cancelOrder = async (orderId) => {
     throw error;
   }
 };
+
+// S'abonner à une notification
+export const subscribeToNotification = (subscriptionData) => {
+  if (!subscriptionData.type || !subscriptionData.entityId) {
+    throw new Error('Type et entityId sont requis pour subscribeToNotification');
+  }
+  return apiRequest('/notifications/subscribe', { method: 'POST', body: subscriptionData });
+};
+
+// Récupérer les notifications de l'utilisateur
+export const getNotifications = (page = 1, limit = 20, type) => {
+  let url = `/notifications?page=${page}&limit=${limit}`;
+  if (type) {
+    url += `&type=${type}`;
+  }
+  return apiRequest(url, { method: 'GET' });
+};
+
+// Marquer une notification comme lue
+export const markNotificationAsRead = (notificationId) => {
+  if (!notificationId) throw new Error('notificationId manquant pour markNotificationAsRead');
+  return apiRequest(`/notifications/${notificationId}/read`, { method: 'PATCH' });
+};
+
+// Supprimer une notification
+export const deleteNotification = (notificationId) => {
+  if (!notificationId) throw new Error('notificationId manquant pour deleteNotification');
+  return apiRequest(`/notifications/${notificationId}`, { method: 'DELETE' });
+};
+
+// Créer une notification (admin)
+export const createAdminNotification = (notificationData) => {
+  if (!notificationData.userId || !notificationData.title || !notificationData.message) {
+    throw new Error('userId, title et message sont requis pour createAdminNotification');
+  }
+  return apiRequest('/notifications', { method: 'POST', body: notificationData });
+};
