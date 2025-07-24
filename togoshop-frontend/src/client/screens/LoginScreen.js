@@ -7,8 +7,8 @@ import { AppContext } from '../../shared/context/AppContext';
 
 export default function LoginScreen({ navigation }) {
   const { setUser } = useContext(AppContext);
-  const [name, setName] = useState('Gloire'); // Valeur par défaut correcte
-  const [phone, setPhone] = useState('71634248'); // Valeur par défaut correcte
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState(''); // Valeur par défaut correcte
 
   const handleLogin = async () => {
     try {

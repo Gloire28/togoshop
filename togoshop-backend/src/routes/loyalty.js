@@ -12,4 +12,7 @@ router.post('/add', auth, loyaltyController.addPoints);
 // Utiliser des points pour une réduction ou récompense
 router.post('/redeem', auth, loyaltyController.redeemPoints);
 
+//remboursement des point de fidélité
+router.post('/refund', auth, loyaltyController.refundPoints);
+
 module.exports = router;

@@ -14,6 +14,7 @@ import {
   Alert
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { getProducts, getSupermarketStatus } from '../../shared/services/api';
 import { AppContext } from '../../shared/context/AppContext';
 import ProductItem from '../components/ProductItem';
@@ -40,6 +41,17 @@ const CatalogueScreen = ({ navigation }) => {
   });
 
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
+
+  // Fonction pour déterminer la couleur du stock
+  const getStockStatus = (stock) => {
+    if (stock <= 5) {
+      return { color: '#ff4d4f' }; // Rouge pour 0 à 5
+    } else if (stock > 5 && stock <= 15) {
+      return { color: '#f1c40f' }; // Jaune pour 5 à 15
+    } else {
+      return { color: '#28a745' }; // Vert pour > 15
+    }
+  };
 
   // Charger les produits et le statut du supermarché
   useEffect(() => {
@@ -197,88 +209,101 @@ const CatalogueScreen = ({ navigation }) => {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#808080" />
-      </SafeAreaView>
+      <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+        <SafeAreaView style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#808080" />
+        </SafeAreaView>
+      </LinearGradient>
     );
   }
 
   if (error) {
     return (
-      <SafeAreaView style={styles.errorContainer}>
-        <Text style={styles.errorText}>{error}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={() => navigation.goBack()}>
-          <Text style={styles.retryButtonText}>Retour</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
+      <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+        <SafeAreaView style={styles.errorContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={() => navigation.goBack()}>
+            <Text style={styles.retryButtonText}>Retour</Text>
+          </TouchableOpacity>
+        </SafeAreaView>
+      </LinearGradient>
     );
   }
 
   const displayedProducts = filteredProducts();
 
   return (
-    <SafeAreaView style={styles.container}>
-      {supermarketStatus && supermarketStatus.status !== 'open' && (
-        <View style={styles.banner}>
-          <Text style={styles.bannerText}>
-            Ce site est actuellement fermé. Vous pouvez consulter le catalogue, mais les achats sont désactivés.
-            {supermarketStatus.closureReason && `\nRaison: ${supermarketStatus.closureReason}`}
-          </Text>
-        </View>
-      )}
-      <View style={styles.header}>
-        <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
-            <Text style={styles.backButton}>Retour</Text>
-          </TouchableOpacity>
-          <Text style={styles.title}>Catalogue</Text>
-          {renderCartIcon()}
-        </View>
-        <View style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchBar}
-            placeholder="Rechercher..."
-            value={state.searchQuery}
-            onChangeText={(text) => setState((prev) => ({ ...prev, searchQuery: text }))}
-            placeholderTextColor="#666"
-          />
-        </View>
-        {renderCategoryTabs()}
-      </View>
-      <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
-        <FlatList
-          data={displayedProducts}
-          renderItem={({ item }) => (
-            <ProductItem 
-              item={item} 
-              addToCartHandler={addToCartHandler} 
-              fadeAnim={fadeAnim} 
-              isSupermarketOpen={supermarketStatus?.status === 'open'}
+    <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+      <SafeAreaView style={styles.container}>
+        {supermarketStatus && supermarketStatus.status !== 'open' && (
+          <View style={styles.banner}>
+            <Text style={styles.bannerText}>
+              Ce site est actuellement fermé. Vous pouvez consulter le catalogue, mais les achats sont désactivés.
+              {supermarketStatus.closureReason && `\nRaison: ${supermarketStatus.closureReason}`}
+            </Text>
+          </View>
+        )}
+        <View style={styles.header}>
+          <View style={styles.headerRow}>
+            <TouchableOpacity onPress={() => navigation.goBack()}>
+              <Text style={styles.backButton}>Retour</Text>
+            </TouchableOpacity>
+            <Text style={styles.title}>Catalogue</Text>
+            {renderCartIcon()}
+          </View>
+          <View style={styles.searchContainer}>
+            <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchBar}
+              placeholder="Rechercher..."
+              value={state.searchQuery}
+              onChangeText={(text) => setState((prev) => ({ ...prev, searchQuery: text }))}
+              placeholderTextColor="#666"
             />
-          )}
-          keyExtractor={(item) => item._id}
-          numColumns={2}
-          columnWrapperStyle={styles.columnWrapper}
-          style={styles.list}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>Aucun produit trouvé.</Text>
-              <Text style={styles.emptySubText}>Veuillez vérifier votre sélection ou votre recherche.</Text>
-            </View>
-          }
-        />
-      </Animated.View>
-    </SafeAreaView>
+          </View>
+          {renderCategoryTabs()}
+        </View>
+        <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
+          <FlatList
+            data={displayedProducts}
+            renderItem={({ item }) => {
+              const stockAtLocation = item.stockByLocation?.find(
+                (stock) => stock.locationId === selectedLocationId
+              ) || { stock: 0 };
+              const stockStatus = getStockStatus(stockAtLocation.stock);
+              return (
+                <ProductItem 
+                  item={item} 
+                  addToCartHandler={addToCartHandler} 
+                  fadeAnim={fadeAnim} 
+                  isSupermarketOpen={supermarketStatus?.status === 'open'}
+                  stockStatus={stockStatus}
+                />
+              );
+            }}
+            keyExtractor={(item) => item._id}
+            numColumns={2}
+            columnWrapperStyle={styles.columnWrapper}
+            style={styles.list}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>Aucun produit trouvé.</Text>
+                <Text style={styles.emptySubText}>Veuillez vérifier votre sélection ou votre recherche.</Text>
+              </View>
+            }
+          />
+        </Animated.View>
+      </SafeAreaView>
+    </LinearGradient>
   );
 };
 
 export default CatalogueScreen;
 
 const styles = StyleSheet.create({
+  gradient: { flex: 1 },
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
   },
   banner: {
     backgroundColor: '#ff4444',
@@ -296,6 +321,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#ddd',
     elevation: 2,
+    borderRadius: 20,
   },
   headerRow: {
     flexDirection: 'row',
@@ -382,13 +408,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
   },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
     padding: 20,
   },
   errorText: {

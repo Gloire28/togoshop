@@ -16,7 +16,7 @@ const loyaltySchema = new mongoose.Schema({
     {
       type: {
         type: String,
-        enum: ['earned', 'redeemed'],
+        enum: ['earned', 'redeemed', 'refunded'],
         required: true,
       },
       amount: {
@@ -26,6 +26,11 @@ const loyaltySchema = new mongoose.Schema({
       description: {
         type: String,
         required: true,
+      },
+      orderId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Order',
+        default: null, 
       },
       date: {
         type: Date,

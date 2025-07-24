@@ -32,8 +32,8 @@ const express = require('express');
      'http://localhost:19006',
      'http://localhost:5000',
      'http://127.0.0.1:5000',
-     'http://192.168.1.75:5000',
-     'exp://192.168.1.75:19000',
+     'http://192.168.1.89:5000',
+     'exp://192.168.1.89:19000',
      'http://localhost:8081',
      /^exp:\/\/.+$/,
    ];
@@ -113,7 +113,7 @@ const express = require('express');
        <h1>API TogoShop</h1>
        <p>Serveur en fonctionnement</p>
        <p>URL locale: http://localhost:${process.env.PORT || 5000}/api</p>
-       <p>IP locale: http://192.168.1.75:${process.env.PORT || 5000}/api</p>
+       <p>IP locale: http://192.168.1.89:${process.env.PORT || 5000}/api</p>
        <p>Documentation: /api/docs (à venir)</p>
      `);
    });
@@ -206,7 +206,7 @@ const express = require('express');
        app.listen(PORT, () => {
          console.log(`\n=== SERVEUR DÉMARRÉ SUR LE PORT ${PORT} ===`);
          console.log(`URL locale: http://localhost:${PORT}`);
-         console.log(`IP locale: http://192.168.1.75:${PORT}`);
+         console.log(`IP locale: http://192.168.1.89:${PORT}`);
          console.log(`Environnement: ${process.env.NODE_ENV || 'development'}`);
          console.log('Origines autorisées:', allowedOrigins);
        });

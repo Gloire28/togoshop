@@ -275,9 +275,11 @@ exports.getUserCart = async (req, res) => {
         message: 'Aucune commande dans le panier',
         order: null,
         products: [],
-        supermarketId: null, 
-        locationId: null,    
+        supermarketId: null,
+        locationId: null,
         orderId: null,
+        loyaltyPointsUsed: 0,
+        loyaltyReductionAmount: 0,
       });
     }
 
@@ -329,7 +331,7 @@ exports.getUserCart = async (req, res) => {
       return total + item.quantity * productPrice;
     }, 0);
 
-    const calculatedTotal = calculatedSubtotal + (order.deliveryFee || 0) + (order.serviceFee || 0) + (order.additionalFees || 0);
+    const calculatedTotal = calculatedSubtotal + (order.deliveryFee || 0) + (order.serviceFee || 0) + (order.additionalFees || 0) - (order.loyaltyReductionAmount || 0);
 
     console.log(`Sous-total calculé: ${calculatedSubtotal}, Total calculé: ${calculatedTotal}`);
 
@@ -341,7 +343,7 @@ exports.getUserCart = async (req, res) => {
         subtotal: calculatedSubtotal,
         totalAmount: calculatedTotal,
         products: order.products,
-        updatedAt: new Date()
+        updatedAt: new Date(),
       };
 
       // Si le panier est vide après mise à jour
@@ -351,6 +353,8 @@ exports.getUserCart = async (req, res) => {
         updateData.deliveryFee = 0;
         updateData.serviceFee = 0;
         updateData.additionalFees = 0;
+        updateData.loyaltyPointsUsed = 0;
+        updateData.loyaltyReductionAmount = 0;
       }
 
       await Order.updateOne({ _id: order._id }, { $set: updateData });
@@ -363,9 +367,10 @@ exports.getUserCart = async (req, res) => {
       ...order,
       products: order.products,
       orderId: order._id,
-      // Garantir que ces valeurs sont présentes même si null
       supermarketId: order.supermarketId || null,
-      locationId: order.locationId || null
+      locationId: order.locationId || null,
+      loyaltyPointsUsed: order.loyaltyPointsUsed || 0,
+      loyaltyReductionAmount: order.loyaltyReductionAmount || 0,
     });
   } catch (error) {
     console.error('Erreur lors de la récupération du panier:', error.message);
@@ -380,11 +385,10 @@ exports.getOrderById = async (req, res) => {
     console.log(`[NEW REQUEST] Tentative de récupération de la commande avec id: ${id} at ${new Date().toISOString()}`);
 
     const order = await Order.findById(id)
-      .select('status paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId subtotal serviceFee totalAmount queuePosition validationCode driverId estimatedTime imageUrl')
-      .populate('driverId', 'name phoneNumber') 
+      .select('status paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId subtotal serviceFee totalAmount queuePosition validationCode driverId estimatedTime imageUrl loyaltyPointsUsed loyaltyReductionAmount')
+      .populate('driverId', 'name phoneNumber')
       .populate('products.productId')
       .populate('supermarketId');
-      
 
     if (!order) {
       console.log(`Aucune commande trouvée pour l'id: ${id}`);
@@ -396,7 +400,11 @@ exports.getOrderById = async (req, res) => {
       return res.status(403).json({ message: 'Accès non autorisé' });
     }
 
-    console.log(`Commande renvoyée pour id ${id}:`, order);
+    console.log(`Commande renvoyée pour id ${id}:`, {
+      ...order.toJSON(),
+      loyaltyPointsUsed: order.loyaltyPointsUsed || 0,
+      loyaltyReductionAmount: order.loyaltyReductionAmount || 0,
+    });
 
     let zoneOrders = [];
     if (order.zoneId && order.status === 'ready_for_pickup' && req.user.role === 'driver') {
@@ -405,10 +413,11 @@ exports.getOrderById = async (req, res) => {
         status: 'ready_for_pickup',
         deliveryType: { $ne: 'evening' },
       })
-        .select('paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId subtotal serviceFee totalAmount imageUrl') // Ajout des champs ici aussi
+        .select('paymentMethod deliveryAddress locationId deliveryFee clientId supermarketId subtotal serviceFee totalAmount imageUrl loyaltyPointsUsed loyaltyReductionAmount')
         .populate('products.productId')
         .populate('supermarketId');
     }
+
     let estimatedTime = 0;
     if (order.status === 'ready_for_pickup' || order.status === 'in_delivery') {
       const supermarket = await Supermarket.findById(order.supermarketId).lean();
@@ -420,9 +429,22 @@ exports.getOrderById = async (req, res) => {
         );
         estimatedTime = Math.round((distance / 20) * 60); // Vitesse moyenne 20 km/h en minutes
       }
-    } 
+    }
 
-    res.status(200).json({ order, zoneOrders, queuePosition: order.queuePosition, estimatedTime });
+    res.status(200).json({
+      order: {
+        ...order.toJSON(),
+        loyaltyPointsUsed: order.loyaltyPointsUsed || 0,
+        loyaltyReductionAmount: order.loyaltyReductionAmount || 0,
+      },
+      zoneOrders: zoneOrders.map(zoneOrder => ({
+        ...zoneOrder.toJSON(),
+        loyaltyPointsUsed: zoneOrder.loyaltyPointsUsed || 0,
+        loyaltyReductionAmount: zoneOrder.loyaltyReductionAmount || 0,
+      })),
+      queuePosition: order.queuePosition,
+      estimatedTime,
+    });
   } catch (error) {
     console.error(`Erreur lors de la récupération de la commande ${req.params.id}:`, error.message);
     res.status(500).json({ message: 'Erreur lors de la récupération de la commande', error: error.message });
@@ -479,6 +501,7 @@ exports.getMyOrders = async (req, res) => {
 
 // Mettre à jour une commande
 exports.updateOrder = async (req, res) => {
+  const { refundPoints } = require('./loyaltyController');
   try {
     const { id } = req.params;
     const { products, deliveryAddress } = req.body;
@@ -486,18 +509,22 @@ exports.updateOrder = async (req, res) => {
     let order = await Order.findById(id).populate('products.productId');
     console.log(`Statut actuel de la commande ${id}: ${order.status}`);
     if (!order) {
+      console.log(`Commande non trouvée pour _id ${id}`);
       return res.status(404).json({ message: 'Commande non trouvée' });
     }
 
     if (order.clientId.toString() !== req.user.id) {
+      console.log(`Utilisateur ${req.user.id} non autorisé à modifier la commande ${id}`);
       return res.status(403).json({ message: 'Non autorisé à modifier cette commande' });
     }
 
     if (!['cart_in_progress', 'pending_validation', 'awaiting_validator'].includes(order.status)) {
+      console.log(`Commande ${id} non modifiable, statut actuel: ${order.status}`);
       return res.status(400).json({ message: 'La commande n’est plus modifiable' });
     }
 
     if (!products || !Array.isArray(products)) {
+      console.log('Liste de produits manquante ou invalide:', req.body);
       return res.status(400).json({ message: 'Liste de produits requise' });
     }
 
@@ -516,7 +543,7 @@ exports.updateOrder = async (req, res) => {
       return res.status(400).json({ message: 'ID de localisation invalide pour les produits' });
     }
 
-    // Gestion du panier vide
+    // Gestion du panier vide ou modification des produits
     let stockIssues = [];
     let validationResult = {
       updatedProducts: [],
@@ -524,8 +551,32 @@ exports.updateOrder = async (req, res) => {
       deliveryFee: 0,
       additionalFees: 0,
       serviceFee: 0,
-      totalAmount: 0
+      totalAmount: 0,
+      reductionAmount: order.loyaltyReductionAmount || 0 // Conserver la réduction existante par défaut
     };
+
+    // Rembourser les points si le panier est vidé
+    if (products.length === 0 && order.loyaltyPointsUsed > 0) {
+      try {
+        const refundResponse = await new Promise((resolve, reject) => {
+          refundPoints(
+            {
+              user: req.user,
+              body: { orderId: id },
+            },
+            {
+              status: (code) => ({
+                json: (data) => (code >= 400 ? reject(data) : resolve(data)),
+              }),
+            }
+          );
+        });
+        console.log(`Points remboursés pour la commande ${id}:`, refundResponse);
+      } catch (error) {
+        console.error(`Erreur lors du remboursement des points pour la commande ${id}:`, error.message);
+        return res.status(500).json({ message: 'Erreur lors du remboursement des points', error: error.message });
+      }
+    }
 
     // Appeler validateStock uniquement si le panier n'est pas vide
     if (products.length > 0) {
@@ -533,6 +584,7 @@ exports.updateOrder = async (req, res) => {
       const productIds = products.map(p => p.productId);
       const productData = await Product.find({ _id: { $in: productIds } }).lean();
       if (productData.length !== productIds.length) {
+        console.log('Certains produits non trouvés:', productIds);
         return res.status(400).json({ message: 'Certains produits n’ont pas été trouvés' });
       }
 
@@ -541,12 +593,14 @@ exports.updateOrder = async (req, res) => {
         order.supermarketId?.toString() || null,
         order.locationId,
         order.deliveryType,
-        deliveryAddress || order.deliveryAddress
+        deliveryAddress || order.deliveryAddress,
+        order.loyaltyReductionAmount || 0 // Passer la réduction existante
       );
       stockIssues = validationResult.stockIssues;
     }
 
     if (stockIssues.length > 0) {
+      console.log('Problèmes de stock détectés:', stockIssues);
       return res.status(200).json({
         message: 'Problème de stock pour certains produits',
         stockIssues,
@@ -560,6 +614,7 @@ exports.updateOrder = async (req, res) => {
           products: validationResult.updatedProducts,
           subtotal: roundToTwoDecimals(validationResult.subtotal),
           deliveryFee: roundToTwoDecimals(validationResult.deliveryFee),
+          reductionAmount: roundToTwoDecimals(validationResult.reductionAmount),
         },
       });
     }
@@ -597,32 +652,53 @@ exports.updateOrder = async (req, res) => {
     }
 
     order.products = validationResult.updatedProducts;
-    
+
     // Réinitialiser complètement si le panier est vide
     if (order.products.length === 0) {
+      console.log(`Panier vide pour la commande ${id}, réinitialisation des champs`);
       order.supermarketId = null;
-      order.locationId = null; 
+      order.locationId = null;
       order.deliveryFee = 0;
       order.serviceFee = 0;
       order.additionalFees = 0;
       order.totalAmount = 0;
       order.subtotal = 0;
+      order.loyaltyPointsUsed = 0;
+      order.loyaltyReductionAmount = 0;
     } else {
       // Recalculer les totaux si le panier n'est pas vide
       order.subtotal = roundToTwoDecimals(validationResult.subtotal);
       order.deliveryFee = roundToTwoDecimals(validationResult.deliveryFee);
       order.serviceFee = roundToTwoDecimals(validationResult.serviceFee);
-      order.totalAmount = roundToTwoDecimals(validationResult.totalAmount);
+      order.additionalFees = roundToTwoDecimals(validationResult.additionalFees);
+      order.loyaltyReductionAmount = roundToTwoDecimals(validationResult.reductionAmount);
+      order.totalAmount = roundToTwoDecimals(
+        validationResult.subtotal +
+        validationResult.deliveryFee +
+        validationResult.serviceFee +
+        validationResult.additionalFees -
+        validationResult.reductionAmount
+      );
       if (!order.locationId) {
+        console.log('ID de localisation manquant pour la commande non vide:', id);
         return res.status(400).json({ message: 'ID de localisation manquant' });
       }
     }
+
+    console.log(`Mise à jour de la commande ${id}:`, {
+      subtotal: order.subtotal,
+      deliveryFee: order.deliveryFee,
+      serviceFee: order.serviceFee,
+      additionalFees: order.additionalFees,
+      loyaltyReductionAmount: order.loyaltyReductionAmount,
+      totalAmount: order.totalAmount,
+    });
 
     await order.save();
 
     // Recharger l'ordre pour avoir les dernières données
     order = await Order.findById(id).populate('products.productId');
-    
+
     res.status(200).json({
       success: true,
       order: {
@@ -630,6 +706,9 @@ exports.updateOrder = async (req, res) => {
         subtotal: roundToTwoDecimals(order.subtotal),
         deliveryFee: roundToTwoDecimals(order.deliveryFee),
         serviceFee: roundToTwoDecimals(order.serviceFee),
+        additionalFees: roundToTwoDecimals(order.additionalFees),
+        loyaltyPointsUsed: order.loyaltyPointsUsed || 0,
+        loyaltyReductionAmount: roundToTwoDecimals(order.loyaltyReductionAmount),
         totalAmount: roundToTwoDecimals(order.totalAmount),
       },
       nextStep: 'payment',
@@ -887,17 +966,24 @@ exports.uploadPhoto = async (req, res) => {
 exports.submitOrder = async (req, res) => {
   try {
     const { id } = req.params;
-    const { paymentMethod, deliveryType, clientPhone } = req.body;
+    const { paymentMethod, deliveryType, clientPhone, loyaltyPoints } = req.body;
 
     // Validation des champs requis
     if (!paymentMethod || !['Flooz', 'TMoney', 'Wallet', 'cash'].includes(paymentMethod)) {
+      console.log(`Mode de paiement invalide: ${paymentMethod}`);
       return res.status(400).json({ message: 'Mode de paiement invalide' });
     }
     if (!deliveryType || !['standard', 'evening', 'retrait'].includes(deliveryType)) {
+      console.log(`Type de livraison invalide: ${deliveryType}`);
       return res.status(400).json({ message: 'Type de livraison invalide' });
     }
     if (['Flooz', 'TMoney'].includes(paymentMethod) && (!clientPhone || !/^\d{8,12}$/.test(clientPhone))) {
+      console.log(`Numéro de téléphone invalide pour ${paymentMethod}: ${clientPhone}`);
       return res.status(400).json({ message: 'Numéro de téléphone invalide pour Flooz/TMoney' });
+    }
+    if (loyaltyPoints !== undefined && (!Number.isInteger(loyaltyPoints) || loyaltyPoints < 0)) {
+      console.log(`Points de fidélité invalides: ${loyaltyPoints}`);
+      return res.status(400).json({ message: 'Nombre de points de fidélité invalide' });
     }
 
     const order = await Order.findById(id).populate('products.productId');
@@ -920,43 +1006,81 @@ exports.submitOrder = async (req, res) => {
     const supermarket = await Supermarket.findById(order.supermarketId);
     const location = supermarket.locations.find(loc => loc._id.toString() === order.locationId);
     if (!location) {
+      console.log(`Emplacement non trouvé pour locationId: ${order.locationId}`);
       return res.status(400).json({ message: 'Emplacement du supermarché non trouvé' });
     }
 
     let deliveryFee = deliveryType === 'evening' ? 400 : 500;
     if (deliveryType !== 'evening' && order.deliveryAddress && order.deliveryAddress.lat && order.deliveryAddress.lng) {
       const distance = calculateDistance(
-        location.latitude,
-        location.longitude,
-        order.deliveryAddress.lat,
-        order.deliveryAddress.lng
+        { lat: location.latitude, lng: location.longitude },
+        { lat: order.deliveryAddress.lat, lng: order.deliveryAddress.lng }
       );
       const distanceFee = distance > 5 ? (distance - 5) * 100 : 0;
       const weightFee = order.products.reduce((total, item) => total + (item.weight || 1) * item.quantity, 0) > 5 ? 50 : 0;
       deliveryFee += distanceFee + weightFee;
     }
 
-    // Recalculer subtotal, serviceFee, et totalAmount en tenant compte de promotedPrice
+    // Recalculer subtotal, serviceFee, et additionalFees
     const subtotal = order.subtotal || order.products.reduce((sum, item) => {
       const price = item.promotedPrice || item.productId?.price || 0;
       return sum + price * item.quantity;
     }, 0);
-    const serviceFee = Math.round(subtotal * 0.10);
-    const totalAmount = subtotal + deliveryFee + (order.additionalFees || 0) + serviceFee;
+    const serviceFee = roundToTwoDecimals(subtotal * 0.10);
+    const additionalFees = order.additionalFees || 0;
 
+    // Gestion des points de fidélité
+    let loyaltyPointsUsed = order.loyaltyPointsUsed || 0;
+    let loyaltyReductionAmount = order.loyaltyReductionAmount || 0;
+    if (loyaltyPoints !== undefined && loyaltyPoints > 0) {
+      if (loyaltyPoints !== order.loyaltyPointsUsed) {
+        console.log(`Incohérence des points de fidélité pour la commande ${id}: envoyés=${loyaltyPoints}, utilisés=${order.loyaltyPointsUsed}`);
+        return res.status(400).json({
+          message: 'Les points de fidélité envoyés ne correspondent pas à ceux déjà utilisés',
+          error: `Points envoyés: ${loyaltyPoints}, Points utilisés: ${order.loyaltyPointsUsed}`,
+        });
+      }
+      // Pas besoin d'appeler redeemPoints, car les points ont déjà été appliqués dans /loyalty/redeem
+      loyaltyPointsUsed = order.loyaltyPointsUsed;
+      loyaltyReductionAmount = order.loyaltyReductionAmount;
+    }
+
+    // Recalculer totalAmount
+    const totalAmount = roundToTwoDecimals(subtotal + deliveryFee + serviceFee + additionalFees - loyaltyReductionAmount);
+    if (totalAmount < 0) {
+      console.log(`Montant total négatif après réduction pour la commande ${id}: ${totalAmount}`);
+      return res.status(400).json({ message: 'La réduction des points de fidélité ne peut pas rendre le montant total négatif' });
+    }
+
+    // Mettre à jour les champs de la commande
     order.subtotal = roundToTwoDecimals(subtotal);
     order.deliveryFee = roundToTwoDecimals(deliveryFee);
     order.serviceFee = roundToTwoDecimals(serviceFee);
-    order.totalAmount = roundToTwoDecimals(totalAmount);
+    order.additionalFees = roundToTwoDecimals(additionalFees);
+    order.loyaltyPointsUsed = loyaltyPointsUsed;
+    order.loyaltyReductionAmount = roundToTwoDecimals(loyaltyReductionAmount);
+    order.totalAmount = totalAmount;
     order.deliveryType = deliveryType;
-    order.paymentMethod = paymentMethod; 
-    await order.save(); 
+    order.paymentMethod = paymentMethod;
+
+    console.log(`Mise à jour de la commande ${id}:`, {
+      subtotal: order.subtotal,
+      deliveryFee: order.deliveryFee,
+      serviceFee: order.serviceFee,
+      additionalFees: order.additionalFees,
+      loyaltyPointsUsed: order.loyaltyPointsUsed,
+      loyaltyReductionAmount: order.loyaltyReductionAmount,
+      totalAmount: order.totalAmount,
+    });
+
+    await order.save();
 
     // Créer le paiement
     const { paymentId, status: paymentStatus } = await createPayment(id, paymentMethod, clientPhone, req.user);
 
     // Vérifier le statut du paiement avant de soumettre
     if (paymentStatus !== 'completed') {
+      console.log(`Paiement non complété pour la commande ${id}: ${paymentStatus}`);
       return res.status(400).json({ message: 'Le paiement n’a pas été complété. Paiement en attente de confirmation (Flooz/TMoney)' });
     }
 
@@ -985,7 +1109,9 @@ exports.submitOrder = async (req, res) => {
     const orderNumber = `ORD-${Math.floor(Math.random() * 100000)}`;
     await sendNotification(
       order.clientId,
-      `Votre commande (ID: ${order._id}, N°: ${orderNumber}) a été soumise. Position dans la file : ${queuePosition}. Statut : ${newStatus}`
+      `Votre commande (ID: ${order._id}, N°: ${orderNumber}) a été soumise. Position dans la file : ${queuePosition}. Statut : ${newStatus}${
+        loyaltyPointsUsed > 0 ? `. ${loyaltyPointsUsed} points de fidélité utilisés pour une réduction de ${loyaltyReductionAmount} FCFA.` : ''
+      }`
     );
     console.log(`Notification envoyée au client ${order.clientId}`);
 
@@ -1002,6 +1128,9 @@ exports.submitOrder = async (req, res) => {
         subtotal: roundToTwoDecimals(subtotal),
         deliveryFee: roundToTwoDecimals(deliveryFee),
         serviceFee: roundToTwoDecimals(serviceFee),
+        additionalFees: roundToTwoDecimals(additionalFees),
+        loyaltyPointsUsed,
+        loyaltyReductionAmount: roundToTwoDecimals(loyaltyReductionAmount),
         totalAmount: roundToTwoDecimals(totalAmount),
       },
       paymentStatus,
@@ -1250,19 +1379,51 @@ exports.cancelOrder = async (req, res) => {
 
     const order = await Order.findById(id);
     if (!order) {
+      console.log(`Commande non trouvée pour _id ${id}`);
       return res.status(404).json({ message: 'Commande non trouvée' });
     }
 
     // Vérifier que le client est bien le propriétaire de la commande
     if (order.clientId.toString() !== req.user.id) {
+      console.log(`Utilisateur ${req.user.id} non autorisé à annuler la commande ${id}`);
       return res.status(403).json({ message: 'Non autorisé à annuler cette commande' });
     }
 
     // Vérifier que la commande est dans un statut annulable
-    if (!['awaiting_validator', 'pending_validation'].includes(order.status)) {
+    if (!['cart_in_progress', 'awaiting_validator', 'pending_validation'].includes(order.status)) {
+      console.log(`Commande ${id} non annulable, statut actuel: ${order.status}`);
       return res.status(400).json({ 
-        message: 'La commande ne peut être annulée que dans les statuts "en attente" ou "en validation"' 
+        message: 'La commande ne peut être annulée que dans les statuts "cart_in_progress", "awaiting_validator" ou "pending_validation"' 
       });
+    }
+
+    // Rembourser les points de fidélité si utilisés
+    let refundResponse = null;
+    if (order.loyaltyPointsUsed > 0) {
+      try {
+        refundResponse = await new Promise((resolve, reject) => {
+          loyaltyController.refundPoints(
+            {
+              user: req.user,
+              body: { orderId: id },
+            },
+            {
+              status: (code) => ({
+                json: (data) => (code >= 400 ? reject(data) : resolve(data)),
+              }),
+            }
+          );
+        });
+        console.log(`Points remboursés pour la commande ${id}:`, refundResponse);
+
+        // Réinitialiser les champs de fidélité dans la commande
+        order.loyaltyPointsUsed = 0;
+        order.loyaltyReductionAmount = 0;
+        order.totalAmount = order.subtotal + order.deliveryFee + (order.serviceFee || 0);
+      } catch (error) {
+        console.error(`Erreur lors du remboursement des points pour la commande ${id}:`, error.message);
+        return res.status(500).json({ message: 'Erreur lors du remboursement des points', error: error.message });
+      }
     }
 
     // Mettre à jour le statut
@@ -1271,9 +1432,17 @@ exports.cancelOrder = async (req, res) => {
     await order.save();
 
     // Envoyer une notification
-    await sendNotification(order.clientId, `Votre commande (${order._id}) a été annulée.`);
+    const notificationMessage = order.loyaltyPointsUsed > 0
+      ? `Votre commande (${order._id}) a été annulée. ${order.loyaltyPointsUsed} points de fidélité ont été remboursés.`
+      : `Votre commande (${order._id}) a été annulée.`;
+    await sendNotification(order.clientId, notificationMessage);
+    console.log(`Notification d'annulation envoyée au client ${order.clientId}`);
 
-    res.status(200).json({ message: 'Commande annulée avec succès', order });
+    res.status(200).json({ 
+      message: 'Commande annulée avec succès', 
+      order,
+      loyalty: refundResponse ? refundResponse.loyalty : null
+    });
   } catch (error) {
     console.error('Erreur lors de l\'annulation de la commande:', error.message);
     res.status(500).json({ message: 'Erreur lors de l\'annulation', error: error.message });

@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Button, StyleSheet, FlatList, Alert, TextInput, TouchableOpacity } from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, Alert, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { apiRequest } from '../../shared/services/api';
 
 export default function LoyaltyScreen({ navigation }) {
   const [loyalty, setLoyalty] = useState(null);
-  const [pointsToRedeem, setPointsToRedeem] = useState('');
   const [loading, setLoading] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState('Tous'); // Catégorie sélectionnée
 
   // Récupérer les points de fidélité
   useEffect(() => {
@@ -25,35 +26,14 @@ export default function LoyaltyScreen({ navigation }) {
     fetchLoyalty();
   }, []);
 
-  // Échanger des points
-  const handleRedeemPoints = async () => {
-    const points = parseInt(pointsToRedeem, 10);
-    if (!points || points <= 0) {
-      Alert.alert('Erreur', 'Veuillez entrer un nombre de points valide.');
-      return;
-    }
+  // Catégories pour les onglets
+  const categories = ['Tous', 'Gagnés', 'Utilisés'];
 
-    if (points > (loyalty?.points || 0)) {
-      Alert.alert('Erreur', 'Points insuffisants pour cet échange.');
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const response = await apiRequest('/loyalty/redeem', {
-        method: 'POST',
-        body: { points, description: `Échange de ${points} points pour une réduction` },
-      });
-      setLoyalty(response.loyalty);
-      setPointsToRedeem('');
-      Alert.alert('Succès', `Vous avez utilisé ${points} points avec succès !`);
-    } catch (error) {
-      Alert.alert('Erreur', 'Impossible d’échanger les points.');
-      console.log('Erreur lors de l’échange des points:', error.message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Filtrer les transactions en fonction de la catégorie sélectionnée
+  const filteredTransactions = loyalty?.transactions?.filter((transaction) => {
+    if (selectedCategory === 'Tous') return true;
+    return transaction.type === (selectedCategory === 'Gagnés' ? 'earned' : 'redeemed');
+  }) || [];
 
   // Rendu d'une transaction
   const renderTransaction = ({ item }) => (
@@ -74,138 +54,121 @@ export default function LoyaltyScreen({ navigation }) {
     </View>
   );
 
+  // Texte dynamique pour les récompenses
+  const rewardText = 'Savez-vous que vos points peuvent être utilisés pour avoir des réductions.';
+
   if (loading && !loyalty) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.title}>Chargement...</Text>
-      </View>
+      <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+        <View style={styles.container}>
+          <ActivityIndicator size="large" color="#fff" style={{ marginVertical: 20 }} />
+        </View>
+      </LinearGradient>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#333" />
-        </TouchableOpacity>
-        <Text style={styles.title}>Programme de Fidélité</Text>
-      </View>
+    <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.title}>Programme de Fidélité</Text>
+        </View>
 
-      <View style={styles.pointsSection}>
-        <Text style={styles.pointsText}>Vos Points : {loyalty?.points || 0}</Text>
-        <Text style={styles.rewardText}>Récompense : Réduction de 10% pour 100 points</Text>
-      </View>
+        <View style={styles.pointsSection}>
+          <Text style={styles.pointsText}>Vos Points : {loyalty?.points || 0}</Text>
+          <Text style={styles.rewardText}>{rewardText}</Text>
+        </View>
 
-      <View style={styles.redeemSection}>
-        <TextInput
-          style={styles.input}
-          placeholder="Nombre de points à échanger"
-          keyboardType="numeric"
-          value={pointsToRedeem}
-          onChangeText={setPointsToRedeem}
-        />
-        <TouchableOpacity
-          style={[styles.redeemButton, loading && styles.disabledButton]}
-          onPress={handleRedeemPoints}
-          disabled={loading}
-        >
-          <Text style={styles.buttonText}>Échanger des Points</Text>
-        </TouchableOpacity>
-      </View>
+        <View style={styles.categoryContainer}>
+          {categories.map((category) => (
+            <TouchableOpacity
+              key={category}
+              style={[styles.categoryItem, selectedCategory === category && styles.categoryItemActive]}
+              onPress={() => setSelectedCategory(category)}
+            >
+              <Text style={[styles.categoryText, selectedCategory === category && styles.categoryTextActive]}>
+                {category}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
-      <Text style={styles.sectionTitle}>Historique des Transactions</Text>
-      {loyalty?.transactions?.length > 0 ? (
-        <FlatList
-          data={loyalty.transactions}
-          renderItem={renderTransaction}
-          keyExtractor={(item, index) => index.toString()}
-          style={styles.transactionList}
-        />
-      ) : (
-        <Text style={styles.noTransactions}>Aucune transaction pour le moment.</Text>
-      )}
-    </View>
+        <Text style={styles.sectionTitle}>Historique des Transactions</Text>
+        {filteredTransactions.length > 0 ? (
+          <FlatList
+            data={filteredTransactions}
+            renderItem={renderTransaction}
+            keyExtractor={(item, index) => index.toString()}
+            style={styles.transactionList}
+          />
+        ) : (
+          <Text style={styles.noTransactions}>Aucune transaction pour le moment.</Text>
+        )}
+      </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-    padding: 15,
+  gradient: { flex: 1 },
+  container: { flex: 1, padding: 20, paddingTop: 30 }, 
+  header: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    marginBottom: 20, 
+    marginTop: 10, 
+    position: 'absolute', 
+    top: 0,
+    left: 0,
+    right: 0,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    backgroundColor: 'transparent',
+    zIndex: 10,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  backButton: {
-    marginRight: 10,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    flex: 1,
-    textAlign: 'center',
-  },
+  backButton: { padding: 10 },
+  title: { fontSize: 24, fontWeight: '800', color: '#fff', flex: 1, textAlign: 'center' },
   pointsSection: {
     backgroundColor: '#fff',
     borderRadius: 10,
     padding: 15,
-    marginBottom: 20,
-    elevation: 2,
-  },
-  pointsText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#28a745',
-    textAlign: 'center',
-  },
-  rewardText: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginTop: 5,
-  },
-  redeemSection: {
-    backgroundColor: '#fff',
-    borderRadius: 10,
-    padding: 15,
-    marginBottom: 20,
-    elevation: 2,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 5,
-    padding: 10,
     marginBottom: 10,
-    fontSize: 16,
+    marginTop: 60, 
+    elevation: 2,
   },
-  redeemButton: {
-    backgroundColor: '#28a745',
-    padding: 12,
-    borderRadius: 10,
+  pointsText: { fontSize: 20, fontWeight: 'bold', color: '#28a745', textAlign: 'center' },
+  rewardText: { fontSize: 16, color: '#666', textAlign: 'center', marginTop: 5 },
+  categoryContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  categoryItem: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingHorizontal: 15,
+    flex: 1,
+    marginHorizontal: 5,
+    elevation: 2,
     alignItems: 'center',
   },
-  disabledButton: {
-    backgroundColor: '#a5d6a7',
+  categoryItemActive: {
+    backgroundColor: '#28a745',
   },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  sectionTitle: {
-    fontSize: 20,
+  categoryText: {
+    fontSize: 14,
     fontWeight: '600',
-    color: '#2c3e50',
-    marginBottom: 10,
+    color: '#333',
   },
-  transactionList: {
-    flex: 1,
+  categoryTextActive: {
+    color: '#fff',
   },
+  sectionTitle: { fontSize: 20, fontWeight: '600', color: '#fff', marginBottom: 10 },
+  transactionList: { flex: 1 },
   transactionItem: {
     backgroundColor: '#fff',
     borderRadius: 5,
@@ -213,23 +176,8 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     elevation: 1,
   },
-  transactionText: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  transactionDescription: {
-    fontSize: 14,
-    color: '#666',
-  },
-  transactionDate: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 5,
-  },
-  noTransactions: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-  },
+  transactionText: { fontSize: 16, fontWeight: 'bold', color: '#333' },
+  transactionDescription: { fontSize: 14, color: '#666' },
+  transactionDate: { fontSize: 12, color: '#999', marginTop: 5 },
+  noTransactions: { fontSize: 16, color: '#fff', textAlign: 'center' },
 });

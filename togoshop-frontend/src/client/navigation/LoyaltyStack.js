@@ -6,7 +6,7 @@ const Stack = createStackNavigator();
 
 export default function LoyaltyStack() {
   return (
-    <Stack.Navigator>
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen
         name="LoyaltyMain"
         component={LoyaltyScreen}

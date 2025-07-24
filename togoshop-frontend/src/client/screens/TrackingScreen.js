@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Alert, Animated, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Alert, Animated, TouchableOpacity, ScrollView } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { getOrderDetails, cancelOrder } from '../../shared/services/api';
 
 export default function TrackingScreen({ navigation, route }) {
@@ -64,23 +65,25 @@ export default function TrackingScreen({ navigation, route }) {
       'Êtes-vous sûr de vouloir annuler cette commande ?',
       [
         { text: 'Non', style: 'cancel' },
-        { text: 'Oui', onPress: async () => {
-          try {
-            await cancelOrder(orderId);
-            Alert.alert('Succès', 'Commande annulée avec succès.');
-            navigation.navigate('ProfileStack');
-          } catch (error) {
-            Alert.alert('Erreur', `Échec de l'annulation: ${error.message}`);
-          }
-        }},
+        {
+          text: 'Oui',
+          onPress: async () => {
+            try {
+              await cancelOrder(orderId);
+              Alert.alert('Succès', 'Commande annulée avec succès.');
+              navigation.navigate('ProfileStack');
+            } catch (error) {
+              Alert.alert('Erreur', `Échec de l'annulation: ${error.message}`);
+            }
+          },
+        },
       ]
     );
   };
 
-  // Nouveau : Fonction pour générer le message de statut
   const renderStatusMessage = () => {
     if (!order) return null;
-    
+
     switch (order.status) {
       case 'awaiting_validator':
         return (
@@ -90,7 +93,6 @@ export default function TrackingScreen({ navigation, route }) {
             </Text>
           </View>
         );
-      
       case 'pending_validation':
         return (
           <View style={styles.infoContainer}>
@@ -99,7 +101,6 @@ export default function TrackingScreen({ navigation, route }) {
             </Text>
           </View>
         );
-      
       case 'validated':
         return (
           <View style={styles.infoContainer}>
@@ -108,7 +109,6 @@ export default function TrackingScreen({ navigation, route }) {
             </Text>
           </View>
         );
-      
       case 'in_delivery':
         return (
           <View style={styles.infoContainer}>
@@ -117,116 +117,176 @@ export default function TrackingScreen({ navigation, route }) {
             </Text>
           </View>
         );
-      
       default:
         return null;
     }
   };
 
+  // Calculer le total affiché (subtotal - loyaltyReductionAmount)
+  const calculateDisplayTotal = () => {
+    const subtotal = order?.subtotal || 0;
+    const loyaltyReductionAmount = order?.loyaltyReductionAmount || 0;
+    return Math.max(0, subtotal - loyaltyReductionAmount).toFixed(0);
+  };
+
   if (loading) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.title}>Suivi de la Livraison</Text>
-        <TouchableOpacity style={styles.loadingButton} onPress={() => {}}>
-          <Text style={styles.buttonText}>Chargement...</Text>
-        </TouchableOpacity>
-      </View>
+      <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+        <View style={styles.container}>
+          <Text style={styles.title}>Suivi de la Livraison</Text>
+          <TouchableOpacity style={styles.loadingButton} onPress={() => {}}>
+            <Text style={styles.buttonText}>Chargement...</Text>
+          </TouchableOpacity>
+        </View>
+      </LinearGradient>
     );
   }
 
   if (error || !order) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.title}>Erreur</Text>
-        <Text style={styles.errorText}>{error || 'Aucune commande trouvée.'}</Text>
-        <TouchableOpacity style={styles.homeButton} onPress={() => navigation.navigate('ProfileStack')}>
-          <Text style={styles.buttonText}>Retour à l'Accueil</Text>
-        </TouchableOpacity>
-      </View>
+      <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+        <View style={styles.container}>
+          <Text style={styles.title}>Erreur</Text>
+          <Text style={styles.errorText}>{error || 'Aucune commande trouvée.'}</Text>
+          <TouchableOpacity style={styles.homeButton} onPress={() => navigation.navigate('ProfileStack')}>
+            <Text style={styles.buttonText}>Retour à l'Accueil</Text>
+          </TouchableOpacity>
+        </View>
+      </LinearGradient>
     );
   }
 
   return (
-    <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
-      <Text style={styles.title}>Suivi de la Livraison</Text>
-      
-      {/* Nouveau : Affichage du message de statut */}
-      {renderStatusMessage()}
-      
-      <View style={styles.trackingInfo}>
-        <Text style={styles.infoText}>Numéro de commande: {order.orderNumber || order._id}</Text>
-        <Text style={styles.infoText}>Adresse: {order.deliveryAddress?.address || 'Non disponible'}</Text>
-        <Text style={styles.infoText}>Statut: {order.status ? order.status.replace(/_/g, ' ').toLowerCase() : 'Inconnu'}</Text>
-        {order.status === 'pending_validation' && (
-          <Text style={styles.infoText}>Position dans la file: {order.queuePosition || 'Non disponible'}</Text>
-        )}
-        <Text style={styles.infoText}>Total: {order.totalAmount || 0} FCFA</Text>
-        <Text style={styles.infoText}>
-          Dernière mise à jour: {order.updatedAt ? new Date(order.updatedAt).toLocaleDateString() : order.createdAt ? new Date(order.createdAt).toLocaleDateString() : 'Non disponible'}
-        </Text>
-        {(order.status === 'in_delivery' || order.status === 'ready_for_pickup') && (
-          <View style={styles.validationCodeContainer}>
-            <Text style={styles.validationCodeLabel}>Code de validation pour le livreur :</Text>
-            <Text style={styles.validationCode}>{order.validationCode || 'Non disponible'}</Text>
-            {order.validationCode === 'Non disponible' ? (
-              <Text style={styles.errorText}>Le code de validation n'est pas disponible. Veuillez contacter le support.</Text>
-            ) : (
-              <Text style={styles.validationCodeInstruction}>
-                Veuillez partager ce code avec le livreur pour confirmer la livraison.
+    <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+      <ScrollView style={styles.scrollView}>
+        <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
+          <Text style={styles.title}>Suivi de la Livraison</Text>
+
+          {renderStatusMessage()}
+
+          <View style={styles.trackingInfo}>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Numéro de commande :</Text>
+              <Text style={styles.infoValue}>{order.orderNumber || order._id}</Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Adresse :</Text>
+              <Text style={styles.infoValue}>{order.deliveryAddress?.address || 'Non disponible'}</Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Statut :</Text>
+              <Text style={styles.infoValue}>
+                {order.status ? order.status.replace(/_/g, ' ').toLowerCase() : 'Inconnu'}
               </Text>
+            </View>
+            {order.status === 'pending_validation' && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Position dans la file :</Text>
+                <Text style={styles.infoValue}>{order.queuePosition || 'Non disponible'}</Text>
+              </View>
+            )}
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Total :</Text>
+              <Text style={styles.infoValueTotal}>{calculateDisplayTotal()} FCFA</Text>
+            </View>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Dernière mise à jour :</Text>
+              <Text style={styles.infoValue}>
+                {order.updatedAt
+                  ? new Date(order.updatedAt).toLocaleDateString()
+                  : order.createdAt
+                  ? new Date(order.createdAt).toLocaleDateString()
+                  : 'Non disponible'}
+              </Text>
+            </View>
+            {(order.status === 'in_delivery' || order.status === 'ready_for_pickup') && (
+              <View style={styles.validationCodeContainer}>
+                <Text style={styles.validationCodeLabel}>Code de validation pour le livreur :</Text>
+                <Text style={styles.validationCode}>{order.validationCode || 'Non disponible'}</Text>
+                {order.validationCode === 'Non disponible' ? (
+                  <Text style={styles.errorText}>Le code de validation n'est pas disponible. Veuillez contacter le support.</Text>
+                ) : (
+                  <Text style={styles.validationCodeInstruction}>
+                    Veuillez partager ce code avec le livreur pour confirmer la livraison.
+                  </Text>
+                )}
+              </View>
             )}
           </View>
-        )}
-      </View>
-      
-      <TouchableOpacity 
-        style={styles.cancelButton} 
-        onPress={handleCancelOrder} 
-        disabled={!['awaiting_validator', 'pending_validation'].includes(order.status)}
-      >
-        <Text style={styles.buttonText}>Annuler la Commande</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity style={styles.homeButton} onPress={() => navigation.navigate('ProfileStack')}>
-        <Text style={styles.buttonText}>Retour à l'Accueil</Text>
-      </TouchableOpacity>
-    </Animated.View>
+
+          <TouchableOpacity
+            style={[
+              styles.cancelButton,
+              !['awaiting_validator', 'pending_validation'].includes(order.status) && styles.disabledButton,
+            ]}
+            onPress={handleCancelOrder}
+            disabled={!['awaiting_validator', 'pending_validation'].includes(order.status)}
+          >
+            <Text style={styles.buttonText}>Annuler la Commande</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.homeButton} onPress={() => navigation.navigate('ProfileStack')}>
+            <Text style={styles.buttonText}>Retour à l'Accueil</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      </ScrollView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    padding: 20, 
-    justifyContent: 'center', 
-    backgroundColor: '#f5f5f5' 
+  gradient: { flex: 1 },
+  scrollView: { flex: 1 },
+  container: {
+    flex: 1,
+    padding: 20,
+    marginTop: 20,
   },
-  title: { 
-    fontSize: 24, 
-    fontWeight: 'bold', 
-    marginBottom: 20, 
-    textAlign: 'center', 
-    color: '#2c3e50' 
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 20,
+    textAlign: 'center',
+    color: '#01060bff',
   },
-  trackingInfo: { 
-    backgroundColor: '#fff', 
-    padding: 15, 
-    borderRadius: 10, 
-    borderWidth: 1, 
-    borderColor: '#ddd', 
-    marginBottom: 20, 
-    elevation: 2 
+  trackingInfo: {
+    backgroundColor: '#fff',
+    padding: 15,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    marginBottom: 20,
+    elevation: 2,
   },
-  infoText: { 
-    fontSize: 16, 
-    marginVertical: 8, 
-    color: '#34495e' 
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 5,
   },
-  errorText: { 
-    fontSize: 14, 
-    color: '#e74c3c', 
-    textAlign: 'center', 
-    marginTop: 5 
+  infoLabel: {
+    fontSize: 16,
+    color: '#666',
+    flex: 1,
+  },
+  infoValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    flex: 1,
+    textAlign: 'right',
+  },
+  infoValueTotal: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#e74c3c',
+    flex: 1,
+    textAlign: 'right',
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#e74c3c',
+    textAlign: 'center',
+    marginTop: 5,
   },
   validationCodeContainer: {
     marginTop: 15,
@@ -255,53 +315,6 @@ const styles = StyleSheet.create({
     color: '#7f8c8d',
     textAlign: 'center',
   },
-  cancelButton: {
-    backgroundColor: '#e74c3c',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    marginVertical: 10,
-    elevation: 3,
-    alignItems: 'center',
-  },
-  homeButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    marginVertical: 10,
-    elevation: 3,
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  alertContainer: {
-    backgroundColor: '#ffebee',
-    padding: 10,
-    borderRadius: 8,
-    marginBottom: 15,
-    borderWidth: 1,
-    borderColor: '#ef5350',
-  },
-  alertText: {
-    fontSize: 14,
-    color: '#c62828',
-    textAlign: 'center',
-  },
-  loadingButton: {
-    backgroundColor: '#bdc3c7',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    marginVertical: 10,
-    elevation: 3,
-    alignItems: 'center',
-  },
-  // Nouveaux styles pour les messages de statut
   infoContainer: {
     backgroundColor: '#e8f4f8',
     padding: 15,
@@ -315,5 +328,42 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#2c3e50',
     fontWeight: '500',
+  },
+  cancelButton: {
+    backgroundColor: '#e74c3c',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    marginVertical: 10,
+    elevation: 3,
+    alignItems: 'center',
+  },
+  homeButton: {
+    backgroundColor: '#28a745',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    marginVertical: 10,
+    elevation: 3,
+    alignItems: 'center',
+  },
+  disabledButton: {
+    backgroundColor: '#bdc3c7',
+    opacity: 0.6,
+  },
+  loadingButton: {
+    backgroundColor: '#bdc3c7',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    marginVertical: 10,
+    elevation: 3,
+    alignItems: 'center',
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
   },
 });

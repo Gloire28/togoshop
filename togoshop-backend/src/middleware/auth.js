@@ -9,9 +9,10 @@ const Promotion = require('../models/Promotion');
 // Tableau de permissions strictes (routes spécifiques en premier)
 const permissions = [
   { path: '/login', method: 'POST', baseUrl: '/api/auth', roles: [] },
+  { path: '/register', method: 'POST', baseUrl: '/api/auth', roles: [] },
   { path: '/manager', method: 'GET', baseUrl: '/api/orders', roles: ['manager', 'order_validator', 'stock_manager'] },
   { path: '/supermarket/:supermarketId/pending', method: 'GET', baseUrl: '/api/orders', roles: ['manager', 'order_validator', 'stock_manager'] },
-  { path: '/me', method: 'GET', baseUrl: '/api/managers', roles: ['manager', 'order_validator', 'stock_manager'] },
+  { path: '/me', method: 'GET', baseUrl: '/api/managers', roles: ['manager', 'order_validator', 'stock_manager', 'admin'] },
   { path: '/me/availability', method: 'PUT', baseUrl: '/api/managers', roles: ['manager', 'order_validator', 'stock_manager'] },
   { path: '/:id/submit', method: 'PUT', baseUrl: '/api/orders', roles: ['client'] },
   { path: '/:id/validate-delivery', method: 'POST', baseUrl: '/api/orders', roles: ['client'] },
@@ -114,7 +115,7 @@ const permissions = [
   { path: '/user/history', method: 'GET', baseUrl: '/api/orders', roles: ['client'] },
   { path: '/user/cart', method: 'GET', baseUrl: '/api/orders', roles: ['client'] },
   { path: '/user/cart', method: 'POST', baseUrl: '/api/orders', roles: ['client'] },
-  { path: '/me', method: 'GET', baseUrl: '/api/drivers', roles: ['driver'] },
+  { path: '/me', method: 'GET', baseUrl: '/api/drivers', roles: ['driver', 'admin'] },
   { path: '/location', method: 'PUT', baseUrl: '/api/drivers', roles: ['driver'] },
   { path: '/discoverable', method: 'PUT', baseUrl: '/api/drivers', roles: ['driver'] },
   { path: '/:id/location', method: 'GET', baseUrl: '/api/drivers', roles: ['client'] },
@@ -126,8 +127,10 @@ const permissions = [
   { path: '/register', method: 'POST', baseUrl: '/api/drivers', roles: ['admin'] },
   { path: '/', method: 'GET', baseUrl: '/api/supermarkets', roles: ['client'] },
   { path: '/points', method: 'GET', baseUrl: '/api/loyalty', roles: ['client'] },
-  { path: '/me', method: 'GET', baseUrl: '/api/loyalty', roles: ['client'] },
-  { path: '/me', method: 'GET', baseUrl: '/api/users', roles: ['client'] },
+  { path: '/me', method: 'GET', baseUrl: '/api/loyalty', roles: ['client', 'admin'] },
+  { path: '/add', method: 'POST', baseUrl: '/api/loyalty', roles: ['admin'] },
+  { path: '/me', method: 'GET', baseUrl: '/api/users', roles: ['client', 'admin'] },
+  { path: '/me', method: 'PUT', baseUrl: '/api/users', roles: ['client'] },
   { path: '/', method: 'GET', baseUrl: '/api/promotions', roles: ['client', 'driver', 'manager', 'admin'] },
   { 
     path: '/supermarket/:supermarketId', 
@@ -148,6 +151,18 @@ const permissions = [
       const { supermarketId } = req.body;
       return req.user.supermarketId === supermarketId;
     }
+  },
+  { 
+  path: '/redeem', 
+  method: 'POST', 
+  baseUrl: '/api/loyalty', 
+  roles: ['client'] 
+  },
+  { 
+    path: '/refund', 
+    method: 'POST', 
+    baseUrl: '/api/loyalty', 
+    roles: ['client'] 
   },
   { 
     path: '/:id/toggle-status', 
@@ -255,6 +270,7 @@ const getActionDescription = (method, baseUrl, path) => {
   }
   if (baseUrl === '/api/auth') {
     if (path === 'login' && method === 'POST') return 'Connexion de l\'utilisateur';
+    if (path === 'register' && method === 'POST') return 'Inscription d\'un utilisateur';
   }
   if (baseUrl === '/api/drivers') {
     if (path === 'me' && method === 'GET') return 'Récupération des informations du livreur';

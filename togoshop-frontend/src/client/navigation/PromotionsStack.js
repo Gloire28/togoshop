@@ -7,7 +7,7 @@ const Stack = createStackNavigator();
 
 export default function PromotionsStack() {
   return (
-    <Stack.Navigator>
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen
         name="PromotionsMain"
         component={PromotionScreen}

@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { apiRequest, getSupermarket, updateOrderStatus } from '../../shared/services/api';
+import { apiRequest, getSupermarket } from '../../shared/services/api';
+import { AppContext } from '../../shared/context/AppContext';
 
 const ProgressBar = ({ currentStep }) => {
   const steps = [
@@ -14,7 +16,7 @@ const ProgressBar = ({ currentStep }) => {
 
   return (
     <View style={styles.progressBarContainer}>
-      {steps.map((stepItem) => (
+      {steps.map((stepItem, index) => (
         <View key={stepItem.step} style={styles.progressStep}>
           <View
             style={[
@@ -39,6 +41,14 @@ const ProgressBar = ({ currentStep }) => {
           >
             {stepItem.label}
           </Text>
+          {index < steps.length - 1 && (
+            <View
+              style={[
+                styles.connector,
+                currentStep > stepItem.step ? styles.connectorActive : styles.connectorInactive,
+              ]}
+            />
+          )}
         </View>
       ))}
     </View>
@@ -46,7 +56,8 @@ const ProgressBar = ({ currentStep }) => {
 };
 
 export default function PaymentScreen({ route, navigation }) {
-  const { orderId } = route.params || {};
+  const { orderId, deliveryAddress } = route.params || {};
+  const { cart, fetchCart, loyaltyPointsUsed, loyaltyReductionAmount } = useContext(AppContext);
   const [order, setOrder] = useState(null);
   const [supermarketLocation, setSupermarketLocation] = useState({ lat: 0, lng: 0 });
   const [paymentMethod, setPaymentMethod] = useState('cash');
@@ -55,22 +66,27 @@ export default function PaymentScreen({ route, navigation }) {
 
   useEffect(() => {
     if (!orderId) {
+      console.log('Erreur: orderId manquant dans route.params');
       Alert.alert('Erreur', 'Aucun ID de commande trouvé. Redirection...', [
         { text: 'OK', onPress: () => navigation.navigate('Home') }
       ]);
+      return;
     }
-  }, [orderId]);
 
-  useEffect(() => {
     const fetchOrderAndSupermarket = async () => {
       try {
+        // Synchroniser avec AppContext
+        const cartResponse = await fetchCart();
+        console.log('Réponse fetchCart dans PaymentScreen:', JSON.stringify(cartResponse, null, 2));
+
+        // Récupérer les détails de la commande
         const orderResponse = await apiRequest(`/orders/${orderId}`);
-        console.log('Réponse complète de /orders/:id :', JSON.stringify(orderResponse, null, 2));
+        console.log('Réponse complète de /orders/:id:', JSON.stringify(orderResponse, null, 2));
         if (!orderResponse.order) {
           throw new Error('Commande non trouvée dans la réponse');
         }
 
-        // Normaliser les produits pour un accès direct
+        // Normaliser les produits
         const normalizedOrder = {
           ...orderResponse.order,
           products: orderResponse.order.products.map(item => ({
@@ -89,38 +105,46 @@ export default function PaymentScreen({ route, navigation }) {
         setOrder(normalizedOrder);
         console.log('Order normalisé après setOrder:', JSON.stringify(normalizedOrder, null, 2));
 
+        // Récupérer l'emplacement du supermarché
         const supermarketId = normalizedOrder.supermarketId?._id || normalizedOrder.supermarketId;
         const locationId = normalizedOrder.locationId;
-
-        if (!supermarketId) {
-          throw new Error('ID du supermarché non trouvé dans la commande');
-        }
-        if (!locationId) {
-          throw new Error('ID de l’emplacement non trouvé dans la commande');
+        if (!supermarketId || !locationId) {
+          throw new Error('ID du supermarché ou de l’emplacement manquant');
         }
 
         const supermarket = await getSupermarket(supermarketId);
         const location = supermarket.locations.find(loc => loc._id === locationId);
         if (location) {
           setSupermarketLocation({ lat: location.latitude, lng: location.longitude });
+          console.log('Emplacement supermarché:', { lat: location.latitude, lng: location.longitude });
         } else {
+          console.warn('Emplacement du supermarché non trouvé');
           Alert.alert('Erreur', 'Emplacement du supermarché non trouvé.');
         }
       } catch (error) {
-        console.log('Erreur lors de la récupération des données:', error.message);
+        console.error('Erreur lors de la récupération des données:', error.message);
         Alert.alert('Erreur', 'Impossible de récupérer les détails de la commande ou du supermarché.');
       }
     };
-    if (orderId) fetchOrderAndSupermarket();
-  }, [orderId]);
 
-  // Utiliser directement les valeurs du backend
-  const subtotal = order?.subtotal || 0;
-  const deliveryFee = order?.deliveryFee || 0;
-  const serviceFee = order?.serviceFee || 0;
-  const totalAmount = order?.totalAmount || 0;
+    fetchOrderAndSupermarket();
+  }, [orderId, fetchCart]);
 
-  console.log('Valeurs affichées - Sous-total:', subtotal, 'Frais de livraison:', deliveryFee, 'Frais de service:', serviceFee, 'Total:', totalAmount);
+  // Calculer le sous-total et le total à partir des produits
+  const calculateSubtotal = () => {
+    if (!order?.products) return 0;
+    const subtotal = order.products.reduce((total, item) => {
+      const price = item.promotedPrice !== null ? item.promotedPrice : item.price || 0;
+      return total + price * (item.quantity || 1);
+    }, 0);
+    return Number(subtotal.toFixed(0));
+  };
+
+  const calculateTotal = () => {
+    const subtotal = calculateSubtotal();
+    const total = Math.max(0, subtotal - (order?.loyaltyReductionAmount || 0));
+    return Number(total.toFixed(0));
+  };
 
   const handlePayment = async () => {
     console.log('Mode de paiement sélectionné:', paymentMethod);
@@ -135,175 +159,202 @@ export default function PaymentScreen({ route, navigation }) {
     }
 
     try {
+      const submitData = {
+        paymentMethod,
+        deliveryType,
+        clientPhone: clientPhone || undefined,
+        loyaltyPoints: order?.loyaltyPointsUsed || 0, // Inclure pour cohérence avec submitOrder
+      };
+      console.log('Envoi de submitOrder:', { orderId, submitData });
       const response = await apiRequest(`/orders/${orderId}/submit`, {
         method: 'PUT',
-        body: { paymentMethod, deliveryType, clientPhone },
+        body: submitData,
       });
+      console.log('Réponse de submitOrder:', JSON.stringify(response, null, 2));
       const orderNumber = response.orderNumber;
       setOrder(prevOrder => ({
         ...prevOrder,
         ...response.order,
-        deliveryFee: response.order.deliveryFee,
         status: response.order.status,
       }));
       await AsyncStorage.setItem('cart', JSON.stringify([]));
       Alert.alert(
         'Commande Soumise',
-        `Numéro de commande : ${orderNumber}\nMéthode : ${paymentMethod}\nLivraison : ${deliveryType}\nTotal : ${response.order.totalAmount} FCFA\nStatut : ${response.order.status}`,
+        `Numéro de commande : ${orderNumber}\nMéthode : ${paymentMethod}\nLivraison : ${deliveryType}\nTotal : ${calculateTotal()} FCFA\nStatut : ${response.order.status}`,
         [{ text: 'OK', onPress: () => navigation.navigate('Tracking', { orderId }) }]
       );
     } catch (error) {
-      console.log('Erreur lors de la soumission de la commande:', error.message);
+      console.error('Erreur lors de la soumission de la commande:', error.message);
       Alert.alert('Erreur', `Impossible de soumettre la commande: ${error.message}`);
     }
   };
 
   if (!order) {
     return (
-      <View style={styles.container}>
-        <Text>Chargement...</Text>
-      </View>
+      <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+        <View style={styles.container}>
+          <Text style={styles.loadingText}>Chargement...</Text>
+        </View>
+      </LinearGradient>
     );
   }
 
-  return (
-    <ScrollView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#333" />
-        </TouchableOpacity>
-        <ProgressBar currentStep={3} />
-      </View>
-      <View style={styles.content}>
-        <Text style={styles.title}>Récapitulatif de Votre Commande</Text>
+  const subtotal = calculateSubtotal();
+  const total = calculateTotal();
+  console.log('Récapitulatif calculé:', {
+    subtotal,
+    loyaltyPointsUsed: order?.loyaltyPointsUsed || 0,
+    loyaltyReductionAmount: order?.loyaltyReductionAmount || 0,
+    total,
+  });
 
-        <View style={styles.receiptTable}>
-          <View style={styles.tableHeader}>
-            <Text style={styles.tableHeaderText}>Nom</Text>
-            <Text style={styles.tableHeaderText}>Prix (FCFA)</Text>
-            <Text style={styles.tableHeaderText}>Qté</Text>
-            <Text style={styles.tableHeaderText}>Total (FCFA)</Text>
+  return (
+    <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+      <ScrollView style={styles.scrollView}>
+        <View style={styles.container}>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+              <Ionicons name="arrow-back" size={24} color="#333" />
+            </TouchableOpacity>
+            <ProgressBar currentStep={3} />
           </View>
-          {order?.products?.length > 0 ? (
-            <>
-              {order.products.map((item, index) => (
-                <View key={index} style={styles.tableRow}>
-                  <Text style={styles.tableCell}>{item.name || 'Produit inconnu'}</Text>
-                  <Text style={styles.tableCell}>
-                    {(item.promotedPrice !== null ? item.promotedPrice : item.price || 0).toFixed(0)}
-                  </Text>
-                  <Text style={styles.tableCell}>{item.quantity || 0}</Text>
-                  <Text style={styles.tableCell}>
-                    {((item.promotedPrice !== null ? item.promotedPrice : item.price || 0) * (item.quantity || 0)).toFixed(0)}
+          <View style={styles.content}>
+            <Text style={styles.title}>Récapitulatif de Votre Commande</Text>
+
+            <View style={styles.receiptTable}>
+              <View style={styles.tableHeader}>
+                <Text style={styles.tableHeaderText}>Nom</Text>
+                <Text style={styles.tableHeaderText}>Prix (FCFA)</Text>
+                <Text style={styles.tableHeaderText}>Qté</Text>
+                <Text style={styles.tableHeaderText}>Total (FCFA)</Text>
+              </View>
+              {order?.products?.length > 0 ? (
+                <>
+                  {order.products.map((item, index) => (
+                    <View key={index} style={styles.tableRow}>
+                      <Text style={styles.tableCell}>{item.name || 'Produit inconnu'}</Text>
+                      <Text style={styles.tableCell}>
+                        {(item.promotedPrice !== null ? item.promotedPrice : item.price || 0).toFixed(0)}
+                      </Text>
+                      <Text style={styles.tableCell}>{item.quantity || 0}</Text>
+                      <Text style={styles.tableCell}>
+                        {((item.promotedPrice !== null ? item.promotedPrice : item.price || 0) * (item.quantity || 0)).toFixed(0)}
+                      </Text>
+                    </View>
+                  ))}
+                  <View style={styles.tableRow}>
+                    <Text style={[styles.tableCell, styles.thankYouMessage]}>
+                      Merci d'avoir choisi nos services ! 🛒
+                    </Text>
+                  </View>
+                </>
+              ) : (
+                <View style={styles.tableRow}>
+                  <Text style={styles.tableCell}>Aucun produit dans cette commande</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.summarySection}>
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabel}>Sous-total :</Text>
+                <Text style={styles.summaryValue}>{subtotal.toFixed(0)} FCFA</Text>
+              </View>
+              {(order?.loyaltyPointsUsed || 0) > 0 && (
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Réduction:</Text>
+                  <Text style={styles.summaryValue}>
+                    -{(order?.loyaltyReductionAmount || 0).toFixed(0)} FCFA ({order?.loyaltyPointsUsed || 0})
                   </Text>
                 </View>
-              ))}
-              <View style={styles.tableRow}>
-                <Text style={[styles.tableCell, styles.thankYouMessage]} colSpan={4}>
-                  Merci d'avoir choisi nos services ! 🛒
-                </Text>
+              )}
+              <View style={styles.summaryRow}>
+                <Text style={styles.summaryLabelTotal}>Montant Total :</Text>
+                <Text style={styles.summaryValueTotal}>{total.toFixed(0)} FCFA</Text>
               </View>
-            </>
-          ) : (
-            <View style={styles.tableRow}>
-              <Text style={styles.tableCell} colSpan={4}>Aucun produit dans cette commande</Text>
             </View>
-          )}
-        </View>
 
-        <View style={styles.summarySection}>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Sous-total :</Text>
-            <Text style={styles.summaryValue}>{subtotal.toFixed(0)} FCFA</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Frais de Livraison :</Text>
-            <Text style={styles.summaryValue}>{deliveryFee.toFixed(2)} FCFA</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Frais de Service :</Text>
-            <Text style={styles.summaryValue}>{serviceFee.toFixed(0)} FCFA</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabelTotal}>Montant Total :</Text>
-            <Text style={styles.summaryValueTotal}>{totalAmount.toFixed(0)} FCFA</Text>
+            <Text style={styles.sectionTitle}>Choisir un Mode de Paiement</Text>
+            <View style={styles.cardContainer}>
+              {[
+                { value: 'Flooz', label: 'Flooz', disabled: true },
+                { value: 'TMoney', label: 'TMoney', disabled: true },
+                { value: 'wallet', label: 'Wallet', disabled: true },
+                { value: 'cash', label: 'Espèces', disabled: false },
+              ].map((method) => (
+                <TouchableOpacity
+                  key={method.value}
+                  style={[
+                    styles.paymentCard,
+                    paymentMethod === method.value && styles.selectedCard,
+                    method.disabled && styles.disabledCard,
+                  ]}
+                  onPress={() => {
+                    if (!method.disabled) {
+                      setPaymentMethod(method.value);
+                      console.log('Méthode sélectionnée:', method.value);
+                    }
+                  }}
+                  disabled={method.disabled}
+                >
+                  <Text style={[styles.cardText, method.disabled && styles.disabledText]}>
+                    {method.label}
+                    {method.disabled && ' (Non disponible)'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {['Flooz', 'TMoney'].includes(paymentMethod) && (
+              <View style={styles.phoneInputContainer}>
+                <Text style={styles.sectionTitle}>Numéro de Téléphone</Text>
+                <TextInput
+                  style={styles.phoneInput}
+                  placeholder="Entrez votre numéro (ex: 12345678)"
+                  keyboardType="numeric"
+                  value={clientPhone}
+                  onChangeText={setClientPhone}
+                />
+              </View>
+            )}
+
+            <Text style={styles.sectionTitle}>Choisir un Mode de Livraison</Text>
+            <View style={styles.cardContainer}>
+              {['Evening', 'Standard', 'Retrait'].map((type) => (
+                <TouchableOpacity
+                  key={type}
+                  style={[styles.deliveryCard, deliveryType === type.toLowerCase() && styles.selectedCard]}
+                  onPress={() => {
+                    setDeliveryType(type.toLowerCase());
+                    console.log('Type de livraison sélectionné:', type.toLowerCase());
+                  }}
+                >
+                  <Text style={styles.cardText}>{type}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <View style={styles.buttonContainer}>
+              <TouchableOpacity style={styles.backButtonStyle} onPress={() => navigation.navigate('CartMain')}>
+                <Text style={styles.buttonText}>Retour au Panier</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.confirmButton} onPress={handlePayment}>
+                <Text style={styles.buttonText}>Envoyer au Supermarché</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
-
-        <Text style={styles.sectionTitle}>Choisir un Mode de Paiement</Text>
-        <View style={styles.cardContainer}>
-          {[
-            { value: 'Flooz', label: 'Flooz', disabled: true },
-            { value: 'TMoney', label: 'TMoney', disabled: true },
-            { value: 'wallet', label: 'Wallet', disabled: true },
-            { value: 'cash', label: 'Espèces', disabled: false },
-          ].map((method) => (
-            <TouchableOpacity
-              key={method.value}
-              style={[
-                styles.paymentCard,
-                paymentMethod === method.value && styles.selectedCard,
-                method.disabled && styles.disabledCard,
-              ]}
-              onPress={() => {
-                if (!method.disabled) {
-                  setPaymentMethod(method.value);
-                  console.log('Méthode sélectionnée:', method.value);
-                }
-              }}
-              disabled={method.disabled}
-            >
-              <Text style={[styles.cardText, method.disabled && styles.disabledText]}>
-                {method.label}
-                {method.disabled && ' (Non disponible)'}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {['Flooz', 'TMoney'].includes(paymentMethod) && (
-          <View style={styles.phoneInputContainer}>
-            <Text style={styles.sectionTitle}>Numéro de Téléphone</Text>
-            <TextInput
-              style={styles.phoneInput}
-              placeholder="Entrez votre numéro (ex: 12345678)"
-              keyboardType="numeric"
-              value={clientPhone}
-              onChangeText={setClientPhone}
-            />
-          </View>
-        )}
-
-        <Text style={styles.sectionTitle}>Choisir un Mode de Livraison</Text>
-        <View style={styles.cardContainer}>
-          {['Evening', 'Standard', 'Retrait'].map((type) => (
-            <TouchableOpacity
-              key={type}
-              style={[styles.deliveryCard, deliveryType === type.toLowerCase() && styles.selectedCard]}
-              onPress={() => setDeliveryType(type.toLowerCase())}
-            >
-              <Text style={styles.cardText}>{type}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <View style={styles.buttonContainer}>
-          <TouchableOpacity style={styles.backButtonStyle} onPress={() => navigation.navigate('CartMain')}>
-            <Text style={styles.buttonText}>Retour au Panier</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.confirmButton} onPress={handlePayment}>
-            <Text style={styles.buttonText}>Envoyer au Supermarché</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </ScrollView>
+      </ScrollView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  gradient: { flex: 1 },
+  scrollView: { flex: 1 },
+  container: { flex: 1 },
   header: {
-    marginTop: 40,
+    marginTop: 50,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
@@ -312,16 +363,23 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#ddd',
     elevation: 2,
+    borderRadius: 16,
   },
   backButton: { marginRight: 10 },
   progressBarContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     flex: 1,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    padding: 1,
+    marginBottom: 5,
+    elevation: 2,
   },
   progressStep: {
     alignItems: 'center',
     flex: 1,
+    position: 'relative',
   },
   progressCircle: {
     width: 24,
@@ -357,6 +415,20 @@ const styles = StyleSheet.create({
   },
   progressLabelInactive: {
     color: '#666',
+  },
+  connector: {
+    position: 'absolute',
+    top: 11,
+    left: '50%',
+    width: '100%',
+    height: 2,
+    zIndex: -1,
+  },
+  connectorActive: {
+    backgroundColor: '#28a745',
+  },
+  connectorInactive: {
+    backgroundColor: '#ddd',
   },
   content: { padding: 20 },
   title: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 20, color: '#2c3e50' },
@@ -481,4 +553,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   buttonText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+  loadingText: { fontSize: 16, color: '#fff', textAlign: 'center' },
 });

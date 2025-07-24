@@ -11,25 +11,30 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [referralCode, setReferralCode] = useState(''); // Nouveau champ pour le code de parrainage
   const [loading, setLoading] = useState(false);
 
   const handleRegister = async () => {
-    if (!name || !phone || !email || !password || !confirmPassword) {
-      Alert.alert('Erreur', 'Tous les champs sont requis');
+    if (!name?.trim() || !phone?.trim() || !email?.trim() || !password?.trim() || !confirmPassword?.trim()) {
+      console.log('Valeurs des champs:', { name, phone, email, password, confirmPassword, referralCode });
+      Alert.alert('Erreur', 'Tous les champs obligatoires (nom, téléphone, email, mot de passe, vérification) doivent être remplis');
       return;
     }
     if (password !== confirmPassword) {
+      console.log('Mot de passe non correspondant:', { password, confirmPassword });
       Alert.alert('Erreur', 'Les mots de passe ne correspondent pas');
       return;
     }
 
     setLoading(true);
     try {
-      const userData = { name, phone, email, password };
-      const response = await registerUser(userData); 
+      const userData = { name: name.trim(), phone: phone.trim(), email: email.trim(), password: password.trim(), referralCode: referralCode?.trim() || undefined };
+      console.log('Données envoyées à registerUser:', userData);
+      const response = await registerUser(userData);
       Alert.alert('Succès', 'Inscription réussie');
       navigation.navigate('Login');
     } catch (error) {
+      console.log('Erreur lors de l\'inscription:', error.message);
       Alert.alert('Erreur', error.message || 'Échec de l\'inscription');
     } finally {
       setLoading(false);
@@ -80,6 +85,14 @@ export default function RegisterScreen() {
           placeholder="Vérifier mot de passe"
           secureTextEntry
           placeholderTextColor="#B0B0B0"
+        />
+        <TextInput
+          style={styles.input}
+          value={referralCode}
+          onChangeText={setReferralCode}
+          placeholder="Code de parrainage (optionnel)"
+          placeholderTextColor="#B0B0B0"
+          autoCapitalize="characters"
         />
         <TouchableOpacity style={styles.button} onPress={handleRegister} disabled={loading}>
           {loading ? (

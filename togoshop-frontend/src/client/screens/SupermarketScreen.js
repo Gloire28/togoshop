@@ -10,6 +10,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { AppContext } from '../../shared/context/AppContext';
 import { getSupermarkets, getSupermarketStatus } from '../../shared/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -58,55 +59,61 @@ export default function SupermarketScreen({ navigation }) {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#28a745" />
-      </SafeAreaView>
+      <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+        <SafeAreaView style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#28a745" />
+        </SafeAreaView>
+      </LinearGradient>
     );
   }
 
   if (error) {
     return (
-      <SafeAreaView style={styles.errorContainer}>
-        <Text style={styles.errorText}>{error}</Text>
-      </SafeAreaView>
+      <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+        <SafeAreaView style={styles.errorContainer}>
+          <Text style={styles.errorText}>{error}</Text>
+        </SafeAreaView>
+      </LinearGradient>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Rechercher un supermarché..."
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholderTextColor="#666"
+    <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <View style={styles.searchContainer}>
+            <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Rechercher un supermarché..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholderTextColor="#666"
+            />
+          </View>
+        </View>
+        {filteredSupermarkets && filteredSupermarkets.length > 0 ? (
+          <FlatList
+            data={filteredSupermarkets}
+            renderItem={({ item }) => <SupermarketItem item={item} onPress={handleSupermarketPress} />}
+            keyExtractor={(item) => item._id}
+            style={styles.list}
+            ListEmptyComponent={<Text style={styles.emptyText}>Aucun supermarché trouvé.</Text>}
           />
-        </View>
-      </View>
-      {filteredSupermarkets && filteredSupermarkets.length > 0 ? (
-        <FlatList
-          data={filteredSupermarkets}
-          renderItem={({ item }) => <SupermarketItem item={item} onPress={handleSupermarketPress} />}
-          keyExtractor={(item) => item._id}
-          style={styles.list}
-          ListEmptyComponent={<Text style={styles.emptyText}>Aucun supermarché trouvé.</Text>}
-        />
-      ) : (
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>Aucun supermarché disponible.</Text>
-        </View>
-      )}
-    </SafeAreaView>
+        ) : (
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>Aucun supermarché disponible.</Text>
+          </View>
+        )}
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
+  gradient: { flex: 1 },
   container: {
     flex: 1,
-    backgroundColor: '#f0f4f8', 
   },
   header: {
     padding: 15,
@@ -114,6 +121,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e0e7ff',
     elevation: 4,
+    borderRadius: 10,
   },
   searchContainer: {
     flexDirection: 'row',
@@ -144,13 +152,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f0f4f8',
   },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f0f4f8',
     padding: 20,
   },
   errorText: {

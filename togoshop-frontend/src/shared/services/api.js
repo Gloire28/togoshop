@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BASE_URL = 'http://192.168.1.75:5000/api';
+const BASE_URL = 'http://192.168.1.89:5000/api';
 
 export const apiRequest = async (endpoint, options = {}) => {
   const { method = 'GET', body = null, isFormData = false } = options;
@@ -11,7 +11,7 @@ export const apiRequest = async (endpoint, options = {}) => {
     console.log('Requête envoyée:', `${BASE_URL}${endpoint}`, { method, headers: { 'Content-Type': isFormData ? 'multipart/form-data' : 'application/json', ...(token && { Authorization: `Bearer ${token}` }) } });
 
     // Exclure les endpoints qui ne nécessitent pas de token
-    if (!token && !isFormData && endpoint !== '/auth/login' && endpoint !== '/drivers/login' && endpoint !== '/users/register') {
+    if (!token && !isFormData && endpoint !== '/auth/login' && endpoint !== '/drivers/login' && endpoint !== '/auth/register') {
       throw new Error('Aucun token trouvé dans AsyncStorage');
     }
 
@@ -103,7 +103,12 @@ export const getProducts = async (supermarketId, locationId) => {
 export const getPromotions = () => apiRequest('/promotions', { method: 'GET' });
 
 // Créer une nouvelle commande
-export const createOrder = (orderData) => apiRequest('/orders', { method: 'POST', body: orderData });
+export const createOrder = (orderData) => {
+  if (!orderData.products || !orderData.supermarketId || !orderData.locationId) {
+    throw new Error('products, supermarketId et locationId sont requis pour createOrder');
+  }
+  return apiRequest('/orders', { method: 'POST', body: orderData });
+};
 
 // Récupérer le panier de l’utilisateur
 export const getUserCart = () => {
@@ -113,6 +118,35 @@ export const getUserCart = () => {
       if (!hasImageUrl) {
         console.warn('Attention : Certains produits manquent d\'imageUrl dans getUserCart');
       }
+      if (response.loyaltyReductionAmount || response.loyaltyPointsUsed) {
+        console.log('Panier récupéré avec points de fidélité:', {
+          loyaltyPointsUsed: response.loyaltyPointsUsed,
+          loyaltyReductionAmount: response.loyaltyReductionAmount,
+          totalAmount: response.totalAmount,
+        });
+      }
+    }
+    return response;
+  });
+};
+
+// Soumettre une commande
+export const submitOrder = (orderId, submitData) => {
+  if (!orderId) throw new Error('orderId manquant pour submitOrder');
+  if (!submitData.paymentMethod || !submitData.deliveryType) {
+    throw new Error('paymentMethod et deliveryType sont requis pour submitOrder');
+  }
+  if (submitData.loyaltyPoints && (!Number.isInteger(submitData.loyaltyPoints) || submitData.loyaltyPoints < 0)) {
+    throw new Error('Le nombre de points de fidélité doit être un entier positif ou zéro');
+  }
+  console.log('Envoi de submitOrder:', { orderId, submitData });
+  return apiRequest(`/orders/${orderId}/submit`, { method: 'PUT', body: submitData }).then(response => {
+    if (response && response.order && (response.order.loyaltyReductionAmount || response.order.loyaltyPointsUsed)) {
+      console.log('Commande soumise avec points de fidélité:', {
+        loyaltyPointsUsed: response.order.loyaltyPointsUsed,
+        loyaltyReductionAmount: response.order.loyaltyReductionAmount,
+        totalAmount: response.order.totalAmount,
+      });
     }
     return response;
   });
@@ -121,7 +155,23 @@ export const getUserCart = () => {
 // Mettre à jour une commande existante
 export const updateOrder = (orderId, orderData) => {
   if (!orderId) throw new Error('orderId manquant pour updateOrder');
-  return apiRequest(`/orders/${orderId}`, { method: 'PUT', body: orderData });
+  if (!orderData.products || !Array.isArray(orderData.products)) {
+    throw new Error('products doit être un tableau pour updateOrder');
+  }
+  if (orderData.loyaltyPoints && (!Number.isInteger(orderData.loyaltyPoints) || orderData.loyaltyPoints < 0)) {
+    throw new Error('Le nombre de points de fidélité doit être un entier positif ou zéro');
+  }
+  console.log('Envoi de updateOrder:', { orderId, orderData });
+  return apiRequest(`/orders/${orderId}`, { method: 'PUT', body: orderData }).then(response => {
+    if (response && response.order && (response.order.loyaltyReductionAmount || response.order.loyaltyPointsUsed)) {
+      console.log('Commande mise à jour avec points de fidélité:', {
+        loyaltyPointsUsed: response.order.loyaltyPointsUsed,
+        loyaltyReductionAmount: response.order.loyaltyReductionAmount,
+        totalAmount: response.order.totalAmount,
+      });
+    }
+    return response;
+  });
 };
 
 // Mettre à jour le statut d'une commande (côté client/manager)
@@ -153,10 +203,63 @@ export const addToCartAPI = (cartItem) => {
 export const applyPromotion = (promoCode, orderId) => apiRequest('/promotions/apply', { method: 'POST', body: { code: promoCode, orderId } });
 
 // Récupérer les points de fidélité de l’utilisateur
-export const getUserLoyalty = () => apiRequest('/loyalty/me', { method: 'GET' });
+export const getUserLoyalty = () => {
+  return apiRequest('/loyalty/me', { method: 'GET' }).then(response => {
+    console.log('Points de fidélité récupérés:', {
+      points: response.points,
+      transactions: response.transactions,
+    });
+    return response;
+  });
+};
 
 // Utiliser des points de fidélité pour une réduction
-export const redeemPoints = (points, orderId) => apiRequest('/loyalty/redeem', { method: 'POST', body: { points, orderId } });
+export const redeemPoints = async (points, orderId) => {
+  if (!points || !Number.isInteger(points) || points <= 0) {
+    throw new Error('Le nombre de points doit être un entier positif');
+  }
+  if (!orderId) {
+    throw new Error('orderId manquant pour redeemPoints');
+  }
+  console.log('Envoi de redeemPoints:', { points, orderId });
+  try {
+    const response = await apiRequest('/loyalty/redeem', { method: 'POST', body: { points, orderId } });
+    if (response && response.reductionAmount) {
+      console.log('Réduction appliquée:', {
+        pointsUsed: points,
+        reductionAmount: response.reductionAmount,
+        remainingPoints: response.points,
+      });
+    }
+    // Note : Après redeemPoints, appeler getUserCart ou getOrderDetails pour mettre à jour l'affichage du panier
+    return response;
+  } catch (error) {
+    if (error.message.includes('Points insuffisants')) {
+      throw new Error('Vous n\'avez pas assez de points de fidélité');
+    }
+    if (error.message.includes('cart_in_progress')) {
+      throw new Error('Les points ne peuvent être utilisés que sur un panier en cours');
+    }
+    throw error;
+  }
+};
+
+// Rembourser des points de fidélité pour une commande annulée
+export const refundPoints = (orderId) => {
+  if (!orderId) {
+    throw new Error('orderId manquant pour refundPoints');
+  }
+  console.log('Envoi de refundPoints:', { orderId });
+  return apiRequest('/loyalty/refund', { method: 'POST', body: { orderId } }).then(response => {
+    if (response && response.loyalty) {
+      console.log('Points remboursés:', {
+        points: response.loyalty.points,
+        transactions: response.loyalty.transactions,
+      });
+    }
+    return response;
+  });
+};
 
 // Récupérer toutes les commandes de l’utilisateur
 export const getUserOrders = () => apiRequest('/orders/user/me', { method: 'GET' });
@@ -297,19 +400,25 @@ export const getPromotionLocation = (supermarketId, createdBy) => {
   if (!createdBy) throw new Error('createdBy manquant pour getPromotionLocation');
   return apiRequest(`/promotion-location?supermarketId=${supermarketId}&createdBy=${createdBy}`, { method: 'GET' });
 };
+
 // Inscription d'un utilisateur
 export const registerUser = (userData) => {
-  if (!userData || !userData.name || !userData.email || !userData.phone || !userData.password) {
+  if (!userData || !userData.name || !userData.name.trim() || !userData.email || !userData.email.trim() || !userData.phone || !userData.phone.trim() || !userData.password || !userData.password.trim()) {
+    console.log('Données envoyées à registerUser:', userData);
     throw new Error('Tous les champs (name, email, phone, password) sont requis pour registerUser');
   }
-  return apiRequest('/users/register', { method: 'POST', body: userData });
+  console.log('Données envoyées à /auth/register:', userData);
+  return apiRequest('/auth/register', { method: 'POST', body: userData });
 };
+
 // Annuler une commande
 export const cancelOrder = async (orderId) => {
+  if (!orderId) throw new Error('orderId manquant pour cancelOrder');
   try {
-    const response = await apiRequest(`/orders/${orderId}`, {
-      method: 'DELETE',
-    });
+    const response = await apiRequest(`/orders/${orderId}`, { method: 'DELETE' });
+    if (response && response.loyalty && response.loyalty.points) {
+      console.log('Points remboursés après annulation:', response.loyalty.points);
+    }
     return response;
   } catch (error) {
     throw error;

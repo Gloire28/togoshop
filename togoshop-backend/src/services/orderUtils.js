@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Product = require('../models/Product');
 const Supermarket = require('../models/Supermarket');
 const Promotion = require('../models/Promotion');
+const Order = require('../models/Order');
 const { calculateDistance } = require('./geolocationBackend');
 const { roundToTwoDecimals } = require('./numberUtils');
 
@@ -12,11 +13,28 @@ const { roundToTwoDecimals } = require('./numberUtils');
  * @param {String} locationId - ID de l'emplacement
  * @param {String} deliveryType - Type de livraison
  * @param {Object} deliveryAddress - Adresse de livraison
+ * @param {number} reductionAmount - Montant de réduction appliqué (optionnel, par défaut 0)
+ * @param {String} orderId - ID de la commande (optionnel, pour valider les points de fidélité)
  * @returns {Object} Résultats de validation et calculs
  */
-const validateStock = async (products, supermarketId, locationId, deliveryType, deliveryAddress) => {
+const validateStock = async (products, supermarketId, locationId, deliveryType, deliveryAddress, reductionAmount = 0, orderId = null) => {
   try {
-    if (!products || products.length === 0 || !locationId) {
+    // Validation des paramètres d'entrée
+    if (!Array.isArray(products)) throw new Error('Liste de produits invalide');
+    if (supermarketId && !mongoose.Types.ObjectId.isValid(supermarketId)) throw new Error('ID de supermarché invalide');
+    if (locationId && (typeof locationId !== 'string' || locationId.trim() === '')) 
+      throw new Error('ID de localisation invalide');
+    if (reductionAmount < 0) throw new Error('Le montant de réduction ne peut pas être négatif');
+
+    // Valider la cohérence de reductionAmount avec les points de fidélité si orderId est fourni
+    if (orderId && mongoose.Types.ObjectId.isValid(orderId)) {
+      const order = await Order.findById(orderId).select('loyaltyPointsUsed loyaltyReductionAmount');
+      if (order && order.loyaltyPointsUsed > 0 && reductionAmount !== order.loyaltyPointsUsed * 50) {
+        throw new Error('Le montant de réduction doit correspondre à 50 FCFA par point de fidélité utilisé');
+      }
+    }
+
+    if (!products || products.length === 0 || !locationId || !supermarketId) {
       return {
         stockIssues: [],
         updatedProducts: [],
@@ -25,14 +43,10 @@ const validateStock = async (products, supermarketId, locationId, deliveryType, 
         deliveryFee: 0,
         additionalFees: 0,
         serviceFee: 0,
+        reductionAmount: roundToTwoDecimals(reductionAmount),
         totalAmount: 0,
       };
     }
-    // Validation des paramètres d'entrée
-    if (!Array.isArray(products)) throw new Error('Liste de produits invalide');
-    if (!mongoose.Types.ObjectId.isValid(supermarketId)) throw new Error('ID de supermarché invalide');
-    if (!locationId || typeof locationId !== 'string' || locationId.trim() === '') 
-      throw new Error('ID de localisation invalide')
 
     const stockIssues = [];
     const updatedProducts = [];
@@ -76,10 +90,14 @@ const validateStock = async (products, supermarketId, locationId, deliveryType, 
 
     // Calcul des frais de livraison
     const deliveryFee = calculateDeliveryFee(deliveryType, deliveryAddress, location, totalWeight);
-    const serviceFee = Math.round(subtotal * 0.10);
-    const totalAmount = subtotal + deliveryFee + additionalFees + serviceFee;
+    const serviceFee = roundToTwoDecimals(subtotal * 0.10);
+    const totalAmount = roundToTwoDecimals(subtotal + deliveryFee + additionalFees + serviceFee - reductionAmount);
 
-    return {
+    if (totalAmount < 0) {
+      throw new Error('Le montant total ne peut pas être négatif après réduction');
+    }
+
+    const result = {
       stockIssues,
       updatedProducts,
       subtotal: roundToTwoDecimals(subtotal),
@@ -87,10 +105,24 @@ const validateStock = async (products, supermarketId, locationId, deliveryType, 
       deliveryFee: roundToTwoDecimals(deliveryFee),
       additionalFees: roundToTwoDecimals(additionalFees),
       serviceFee: roundToTwoDecimals(serviceFee),
-      totalAmount: roundToTwoDecimals(totalAmount),
+      reductionAmount: roundToTwoDecimals(reductionAmount),
+      totalAmount,
     };
+
+    console.log('Résultat de validateStock:', {
+      orderId,
+      subtotal: result.subtotal,
+      deliveryFee: result.deliveryFee,
+      additionalFees: result.additionalFees,
+      serviceFee: result.serviceFee,
+      reductionAmount: result.reductionAmount,
+      totalAmount: result.totalAmount,
+      stockIssues: result.stockIssues.length,
+    });
+
+    return result;
   } catch (error) {
-    console.error('Erreur dans validateStock:', error);
+    console.error('Erreur dans validateStock:', error.message);
     throw error;
   }
 };
@@ -136,7 +168,7 @@ const processProductItem = async (item, product, location, supermarket, activePr
       altLocation.latitude,
       altLocation.longitude
     );
-    itemAdditionalFee = 200 + 50 * distance;
+    itemAdditionalFee = roundToTwoDecimals(200 + 50 * distance);
     stockLocationId = item.alternativeLocationId;
   }
 

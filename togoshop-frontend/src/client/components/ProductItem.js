@@ -2,9 +2,7 @@ import React, { memo } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image, Animated } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-const ProductItem = memo(({ item, addToCartHandler, fadeAnim, isSupermarketOpen }) => {
-  const stockAtLocation = item.stockByLocation?.find((s) => s.locationId === item.locationId) || { stock: 0 };
-  const stockColor = stockAtLocation.stock > 15 ? '#00FF00' : stockAtLocation.stock >= 7 ? '#FFD700' : '#FF0000';
+const ProductItem = memo(({ item, addToCartHandler, fadeAnim, isSupermarketOpen, stockStatus }) => {
   const isPromoted = item.promotedPrice !== null && item.promotedPrice < item.price;
   const discountPercentage = isPromoted ? Math.round(((item.price - item.promotedPrice) / item.price) * 100) : 0;
   const imageUrl = item.imageUrl || 'https://via.placeholder.com/150';
@@ -66,7 +64,7 @@ const ProductItem = memo(({ item, addToCartHandler, fadeAnim, isSupermarketOpen 
           )}
         </View>
         <Text style={styles.productWeight}>{item.weight} kg</Text>
-        <View style={[styles.stockIndicator, { backgroundColor: stockColor }]} />
+        <View style={[styles.stockIndicator, { backgroundColor: stockStatus.color }]} />
       </View>
       <TouchableOpacity
         style={[

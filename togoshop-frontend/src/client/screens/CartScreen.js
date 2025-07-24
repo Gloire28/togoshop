@@ -12,8 +12,9 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { AppContext } from '../../shared/context/AppContext';
-import { updateOrder, getUserLoyalty, redeemPoints } from '../../shared/services/api';
+import { updateOrder, getUserLoyalty } from '../../shared/services/api';
 import imageMap from '../../assets/imageMap';
 import debounce from 'lodash.debounce';
 
@@ -60,85 +61,82 @@ const ProgressBar = ({ currentStep }) => {
 };
 
 export default function CartScreen({ navigation }) {
-  const { cart, setCart, fetchCart, loadingCart, error, user } = useContext(AppContext);
+  const {
+    cart,
+    setCart,
+    fetchCart,
+    loadingCart,
+    error,
+    user,
+    loyaltyPoints,
+    loyaltyPointsUsed,
+    loyaltyReductionAmount,
+    applyLoyaltyPoints,
+    setLoyaltyPoints,
+  } = useContext(AppContext);
   const [orderId, setOrderId] = useState(null);
   const [tempComments, setTempComments] = useState({});
   const [isSaving, setIsSaving] = useState({});
   const [isUpdating, setIsUpdating] = useState(false);
-  const [loyaltyPoints, setLoyaltyPoints] = useState(0);
-  const [usedPoints, setUsedPoints] = useState(0);
+  const [pointsToUse, setPointsToUse] = useState(0);
 
   useEffect(() => {
     loadCartData();
-    fetchLoyaltyPoints();
   }, []);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       console.log('CartScreen est actif, rafraîchissement du panier');
       loadCartData();
-      fetchLoyaltyPoints();
     });
     return unsubscribe;
   }, [navigation]);
 
   const loadCartData = async () => {
-  try {
-    const cartResponse = await fetchCart();
-    console.log('Réponse loadCartData:', JSON.stringify(cartResponse, null, 2));
-    
-    if (cartResponse && cartResponse.orderId) {
-      setOrderId(cartResponse.orderId);
+    try {
+      const cartResponse = await fetchCart();
+      console.log('Réponse loadCartData:', JSON.stringify(cartResponse, null, 2));
       
-      
-      const cartItems = cartResponse.cart || [];
-      setCart(cartItems);
-      
-      if (cartItems.length === 0) {
+      if (cartResponse && cartResponse.orderId) {
+        setOrderId(cartResponse.orderId);
+        const cartItems = cartResponse.cart || [];
+        setCart(cartItems);
+        
+        if (cartItems.length === 0) {
+          setOrderId(null);
+          setCart([]);
+        }
+      } else {
+        console.log('Aucune commande valide ou panier vide:', cartResponse);
         setOrderId(null);
         setCart([]);
       }
-    } else {
-      console.log('Aucune commande valide ou panier vide:', cartResponse);
+    } catch (err) {
+      console.error('Erreur lors du chargement des données dans loadCartData:', err.message);
       setOrderId(null);
       setCart([]);
-    }
-  } catch (err) {
-    console.error('Erreur lors du chargement des données dans loadCartData:', err.message);
-    setOrderId(null);
-    setCart([]);
-    Alert.alert('Erreur', 'Impossible de charger le panier : ' + err.message);
-  }
-};
-
-  const fetchLoyaltyPoints = async () => {
-    if (user) {
-      try {
-        const data = await getUserLoyalty();
-        setLoyaltyPoints(data.points || 0);
-      } catch (err) {
-        console.log('Erreur lors de la récupération des points de fidélité:', err.message);
-        Alert.alert('Erreur', 'Impossible de charger les points de fidélité');
-      }
+      Alert.alert('Erreur', 'Impossible de charger le panier : ' + err.message);
     }
   };
 
   const calculateSubtotal = useCallback(() => {
-    const baseTotal = cart.reduce((total, item) => {
+    const baseSubtotal = cart.reduce((total, item) => {
       const price = item.promotedPrice !== null && !isNaN(item.promotedPrice) ? item.promotedPrice : item.price || 0;
       return total + price * (item.quantity || 1);
     }, 0);
-    const pointsDiscount = usedPoints * 10; // 10 FCFA par point
-    return Math.max(0, baseTotal - pointsDiscount);
-  }, [cart, usedPoints]);
+    const total = Math.max(0, baseSubtotal - loyaltyReductionAmount);
+    console.log('Calcul du sous-total:', { baseSubtotal, loyaltyReductionAmount, total });
+    return Number(total.toFixed(2));
+  }, [cart, loyaltyReductionAmount]);
 
   const debouncedFetchCart = debounce(async () => {
     try {
       setIsUpdating(true);
       console.log('Déclenchement de debouncedFetchCart');
-      await fetchCart();
+      const cartResponse = await fetchCart();
+      console.log('Réponse debouncedFetchCart:', JSON.stringify(cartResponse, null, 2));
     } catch (err) {
-      console.log('Erreur lors du rafraîchissement du panier:', err.message);
+      console.error('Erreur lors du rafraîchissement du panier:', err.message);
     } finally {
       setIsUpdating(false);
     }
@@ -162,11 +160,11 @@ export default function CartScreen({ navigation }) {
       }));
       console.log('Corps envoyé à updateOrder:', { orderId, orderData: { products: updatedProducts } });
       await updateOrder(orderId, { products: updatedProducts });
-      debouncedFetchCart();
+      await debouncedFetchCart();
     } catch (err) {
-      console.log('Erreur dans updateQuantity:', err.message);
+      console.error('Erreur dans updateQuantity:', err.message);
       Alert.alert('Erreur', 'Impossible de mettre à jour la quantité : ' + err.message);
-      await fetchCart();
+      await loadCartData();
     } finally {
       setIsSaving(prev => ({ ...prev, [productId]: false }));
       setIsUpdating(false);
@@ -191,15 +189,15 @@ export default function CartScreen({ navigation }) {
               comment: item.comment || '',
               alternativeLocationId: item.alternativeLocationId || '',
               promotedPrice: item.promotedPrice !== null ? item.promotedPrice : null,
-              locationId: item.locationId, 
+              locationId: item.locationId,
             }));
             console.log('Corps envoyé à updateOrder:', { orderId, orderData: { products: updatedProducts } });
             await updateOrder(orderId, { products: updatedProducts });
-            debouncedFetchCart();
+            await debouncedFetchCart();
           } catch (err) {
-            console.log('Erreur dans removeFromCart:', err.message);
+            console.error('Erreur dans removeFromCart:', err.message);
             Alert.alert('Erreur', 'Impossible de supprimer le produit : ' + err.message);
-            await fetchCart();
+            await loadCartData();
           } finally {
             setIsUpdating(false);
           }
@@ -226,13 +224,14 @@ export default function CartScreen({ navigation }) {
         photoUrl: item.photoUrl || '',
         promotedPrice: item.promotedPrice !== null ? item.promotedPrice : null,
       }));
+      console.log('Corps envoyé à updateOrder:', { orderId, orderData: { products: updatedProducts } });
       await updateOrder(orderId, { products: updatedProducts });
-      debouncedFetchCart();
+      await debouncedFetchCart();
     } catch (err) {
-      console.log('Erreur dans updateComment:', err.message);
+      console.error('Erreur dans updateComment:', err.message);
       setTempComments(prev => ({ ...prev, [productId]: '' }));
       Alert.alert('Erreur', 'Impossible de mettre à jour le commentaire : ' + err.message);
-      await fetchCart();
+      await loadCartData();
     } finally {
       setIsSaving(prev => ({ ...prev, [productId]: false }));
       setIsUpdating(false);
@@ -240,19 +239,42 @@ export default function CartScreen({ navigation }) {
   };
 
   const handleRedeemPoints = async () => {
-    if (!orderId || usedPoints <= 0 || usedPoints > loyaltyPoints) {
-      Alert.alert('Erreur', 'Vérifiez vos points disponibles et entrez une valeur valide.');
+    if (!orderId || !Number.isInteger(pointsToUse) || pointsToUse <= 0 || pointsToUse > loyaltyPoints || cart.length === 0) {
+      Alert.alert('Erreur', 'Veuillez entrer un nombre valide de points et vérifier que votre panier n\'est pas vide.');
       return;
     }
     try {
-      await redeemPoints(usedPoints, orderId);
-      setLoyaltyPoints(prev => prev - usedPoints);
-      setUsedPoints(0);
-      Alert.alert('Succès', `${usedPoints} points utilisés avec succès !`);
-      await fetchCart();
+      setIsUpdating(true);
+      console.log('Application des points:', { pointsToUse, orderId, availablePoints: loyaltyPoints, cartLength: cart.length });
+      const result = await applyLoyaltyPoints(pointsToUse, orderId);
+      console.log('Réponse de applyLoyaltyPoints:', JSON.stringify(result, null, 2));
+      if (result.success) {
+        const cartResponse = await fetchCart();
+        console.log('Réponse fetchCart après applyLoyaltyPoints:', JSON.stringify(cartResponse, null, 2));
+        setPointsToUse(0);
+        Alert.alert('Succès', `${pointsToUse} point(s) utilisé(s) pour une réduction de ${pointsToUse * 50} FCFA.`);
+      } else {
+        throw new Error(result.message || 'Échec de l\'application des points');
+      }
     } catch (err) {
-      console.log('Erreur dans handleRedeemPoints:', err.message);
-      Alert.alert('Erreur', err.message || 'Erreur lors de l\'utilisation des points');
+      console.error('Erreur dans handleRedeemPoints:', err.message);
+      let errorMessage = err.message || 'Erreur lors de l\'utilisation des points';
+      if (err.message.includes('mongoose is not defined')) {
+        errorMessage = 'Erreur serveur : problème de configuration de la base de données. Veuillez réessayer plus tard.';
+        // Tentative de récupération des points via /loyalty/me
+        try {
+          const loyaltyResponse = await getUserLoyalty();
+          setLoyaltyPoints(loyaltyResponse.points);
+          console.log('Points récupérés après erreur:', loyaltyResponse.points);
+        } catch (loyaltyErr) {
+          console.error('Erreur lors de la récupération des points:', loyaltyErr.message);
+        }
+      }
+      Alert.alert('Erreur', errorMessage);
+      const cartResponse = await fetchCart();
+      console.log('Réponse fetchCart après erreur:', JSON.stringify(cartResponse, null, 2));
+    } finally {
+      setIsUpdating(false);
     }
   };
 
@@ -276,11 +298,11 @@ export default function CartScreen({ navigation }) {
       <View style={styles.cartItem}>
         <View style={styles.itemImageContainer}>
           {imageUrl ? (
-            <Image 
-              source={{ uri: imageUrl }} 
-              style={styles.itemImage} 
-              resizeMode="contain" 
-              onError={(e) => console.log('Erreur image:', e.nativeEvent.error)} 
+            <Image
+              source={{ uri: imageUrl }}
+              style={styles.itemImage}
+              resizeMode="contain"
+              onError={(e) => console.log('Erreur image:', e.nativeEvent.error)}
             />
           ) : (
             <View style={styles.placeholderImage}>
@@ -293,14 +315,14 @@ export default function CartScreen({ navigation }) {
           <View style={styles.priceContainer}>
             {isPromoted ? (
               <>
-                <Text style={styles.promotedPrice}>{(displayPrice * item.quantity).toFixed(0)} FCFA</Text>
-                <Text style={styles.originalPrice}>{(item.price * item.quantity).toFixed(0)} FCFA</Text>
+                <Text style={styles.promotedPrice}>{(displayPrice * item.quantity).toFixed(2)} FCFA</Text>
+                <Text style={styles.originalPrice}>{(item.price * item.quantity).toFixed(2)} FCFA</Text>
                 <View style={styles.promoBadge}>
                   <Text style={styles.promoBadgeText}>Promo</Text>
                 </View>
               </>
             ) : (
-              <Text style={styles.itemPrice}>{(displayPrice * item.quantity).toFixed(0)} FCFA</Text>
+              <Text style={styles.itemPrice}>{(displayPrice * item.quantity).toFixed(2)} FCFA</Text>
             )}
           </View>
           <View style={styles.quantityContainer}>
@@ -325,6 +347,7 @@ export default function CartScreen({ navigation }) {
             <TextInput
               style={styles.commentInput}
               placeholder="Ajouter un commentaire..."
+              placeholderTextColor="#A1A1AA"
               value={tempComments[item.productId] || item.comment || ''}
               onChangeText={text => setTempComments(prev => ({ ...prev, [item.productId]: text }))}
               maxLength={100}
@@ -342,7 +365,7 @@ export default function CartScreen({ navigation }) {
         </View>
         {isUpdating && (
           <View style={styles.loadingOverlay}>
-            <ActivityIndicator size="large" color="#28a745" />
+            <ActivityIndicator size="large" color="#fff" />
           </View>
         )}
       </View>
@@ -350,18 +373,52 @@ export default function CartScreen({ navigation }) {
   };
 
   const renderSummary = () => {
+    const baseSubtotal = cart.reduce((total, item) => {
+      const price = item.promotedPrice !== null && !isNaN(item.promotedPrice) ? item.promotedPrice : item.price || 0;
+      return total + price * (item.quantity || 1);
+    }, 0);
+    console.log('Résumé de la commande:', {
+      baseSubtotal,
+      loyaltyReductionAmount,
+      loyaltyPointsUsed,
+      total: calculateSubtotal(),
+    });
     return (
       <View style={styles.summaryContainer}>
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryText}>Sous-total produits :</Text>
+          <Text style={styles.summaryValue}>{baseSubtotal.toFixed(2)} FCFA</Text>
+        </View>
+        {loyaltyPointsUsed > 0 && (
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryText}>Réduction (points de fidélité) :</Text>
+            <Text style={styles.summaryValue}>-{loyaltyReductionAmount.toFixed(2)} FCFA ({loyaltyPointsUsed} points)</Text>
+          </View>
+        )}
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryText}>Total :</Text>
+          <Text style={styles.summaryValue}>{calculateSubtotal().toFixed(2)} FCFA</Text>
+        </View>
         <View style={styles.loyaltyContainer}>
           <Text style={styles.loyaltyText}>Points disponibles : {loyaltyPoints}</Text>
           <TextInput
             style={styles.pointsInput}
             placeholder="Points à utiliser"
-            value={usedPoints ? usedPoints.toString() : ''}
-            onChangeText={text => setUsedPoints(parseInt(text) || 0)}
+            placeholderTextColor="#A1A1AA"
+            value={pointsToUse ? pointsToUse.toString() : ''}
+            onChangeText={text => {
+              const value = text.replace(/[^0-9]/g, '');
+              setPointsToUse(value ? parseInt(value) : 0);
+            }}
             keyboardType="numeric"
           />
-          <TouchableOpacity style={styles.loyaltyButton} onPress={handleRedeemPoints}>
+          <TouchableOpacity
+            style={[styles.loyaltyButton, {
+              opacity: (!Number.isInteger(pointsToUse) || pointsToUse <= 0 || pointsToUse > loyaltyPoints || cart.length === 0) ? 0.5 : 1
+            }]}
+            onPress={handleRedeemPoints}
+            disabled={!Number.isInteger(pointsToUse) || pointsToUse <= 0 || pointsToUse > loyaltyPoints || cart.length === 0}
+          >
             <Text style={styles.loyaltyButtonText}>Utiliser</Text>
           </TouchableOpacity>
         </View>
@@ -378,75 +435,92 @@ export default function CartScreen({ navigation }) {
 
   if (loadingCart) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Chargement...</Text>
-        </View>
-      </SafeAreaView>
+      <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+        <SafeAreaView style={styles.container}>
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#fff" />
+            <Text style={styles.loadingText}>Chargement...</Text>
+          </View>
+        </SafeAreaView>
+      </LinearGradient>
     );
   }
 
   if (error) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={fetchCart}>
-            <Text style={styles.retryButtonText}>Réessayer</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
+      <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+        <SafeAreaView style={styles.container}>
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={loadCartData}>
+              <Text style={styles.retryButtonText}>Réessayer</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </LinearGradient>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <ProgressBar currentStep={1} />
-        <Text style={styles.headerText}>Sous-total : {calculateSubtotal().toFixed(0)} FCFA</Text>
-      </View>
-      {cart.length === 0 ? (
-        <Text style={styles.emptyText}>Votre panier est vide</Text>
-      ) : (
-        <FlatList
-          data={cart}
-          renderItem={renderCartItem}
-          keyExtractor={item => item.productId}
-          style={styles.list}
-          ListFooterComponent={renderSummary}
-          ListFooterComponentStyle={styles.footer}
-        />
-      )}
-      {isUpdating && (
-        <View style={styles.globalLoadingOverlay}>
-          <ActivityIndicator size="large" color="#28a745" />
+    <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerText}>Mon Panier</Text>
+          <View style={styles.headerPlaceholder} />
         </View>
-      )}
-    </SafeAreaView>
+        <ProgressBar currentStep={1} />
+        {cart.length === 0 ? (
+          <Text style={styles.emptyText}>Votre panier est vide</Text>
+        ) : (
+          <FlatList
+            data={cart}
+            renderItem={renderCartItem}
+            keyExtractor={item => item.productId}
+            style={styles.list}
+            ListFooterComponent={renderSummary}
+            ListFooterComponentStyle={styles.footer}
+          />
+        )}
+        {isUpdating && (
+          <View style={styles.globalLoadingOverlay}>
+            <ActivityIndicator size="large" color="#fff" />
+          </View>
+        )}
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  gradient: { flex: 1 },
+  container: { flex: 1, padding: 20, paddingTop: 50 },
   header: {
-    backgroundColor: '#fff',
-    padding: 10,
-    paddingTop: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ddd',
-    elevation: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
   },
+  backButton: { padding: 10 },
   headerText: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#fff',
+    flex: 1,
     textAlign: 'center',
-    marginTop: 10,
   },
+  headerPlaceholder: { width: 44 },
   progressBarContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
+    marginBottom: 10,
+    marginTop: -25,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    padding: 15,
+    elevation: 2,
   },
   progressStep: {
     alignItems: 'center',
@@ -486,7 +560,7 @@ const styles = StyleSheet.create({
   progressLabelInactive: {
     color: '#666',
   },
-  list: { flex: 1, padding: 10 },
+  list: { flex: 1 },
   cartItem: {
     flexDirection: 'row',
     backgroundColor: '#fff',
@@ -494,11 +568,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginBottom: 10,
     elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    position: 'relative',
   },
   itemImageContainer: {
     width: 80,
@@ -506,20 +575,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 10,
-    backgroundColor: '#f9f9f9', 
+    backgroundColor: '#f9f9f9',
     borderRadius: 5,
   },
-  itemImage: { 
-    width: '100%', 
-    height: '100%' 
+  itemImage: {
+    width: '100%',
+    height: '100%',
   },
   placeholderImage: {
     width: '100%',
     height: '100%',
-    resizeMode: 'contain',
-    backgroundColor: '#ccc',
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#f9f9f9',
   },
   placeholderText: { color: '#666', fontSize: 12 },
   itemInfo: { flex: 1 },
@@ -547,9 +615,6 @@ const styles = StyleSheet.create({
     borderRadius: 3,
     paddingHorizontal: 6,
     paddingVertical: 2,
-    position: 'absolute',
-    top: 40,
-    left: 185,
   },
   promoBadgeText: {
     color: '#fff',
@@ -562,7 +627,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   quantityButton: {
-    backgroundColor: '#007bff',
+    backgroundColor: '#28a745',
     padding: 5,
     borderRadius: 5,
     width: 30,
@@ -587,6 +652,8 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     padding: 8,
     fontSize: 14,
+    backgroundColor: '#f9f9f9',
+    placeholderTextColor: '#A1A1AA',
   },
   saveButton: {
     marginLeft: 8,
@@ -600,19 +667,41 @@ const styles = StyleSheet.create({
   summaryContainer: {
     backgroundColor: '#fff',
     padding: 20,
-    borderTopWidth: 1,
-    borderTopColor: '#ddd',
+    borderRadius: 10,
     elevation: 2,
+    marginTop: 10,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  summaryText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  summaryValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
   },
   loyaltyContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 10,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    elevation: 2,
+    justifyContent: 'flex-start',
   },
   loyaltyText: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#333',
-    marginRight: 10,
+    marginRight: 8,
+    minWidth: 90,
+    textAlign: 'left',
   },
   pointsInput: {
     borderWidth: 1,
@@ -620,19 +709,23 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     padding: 8,
     fontSize: 14,
-    width: 100,
-    marginRight: 10,
+    width: 70,
+    marginRight: 8,
+    backgroundColor: '#f9f9f9',
+    textAlign: 'left',
   },
   loyaltyButton: {
     backgroundColor: '#28a745',
-    padding: 10,
-    borderRadius: 5,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 8,
     alignItems: 'center',
+    marginLeft: 0,
   },
   loyaltyButtonText: {
     color: '#fff',
     fontSize: 14,
-    fontWeight: 'bold',
+    fontWeight: '600',
   },
   checkoutButton: {
     backgroundColor: '#28a745',
@@ -645,12 +738,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
-  emptyText: { textAlign: 'center', marginTop: 50, fontSize: 18, color: '#666' },
+  emptyText: { textAlign: 'center', marginTop: 50, fontSize: 16, color: '#fff' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { fontSize: 16, color: '#666' },
+  loadingText: { fontSize: 16, color: '#fff', marginTop: 10 },
   errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   errorText: { fontSize: 16, color: '#ff4d4f', textAlign: 'center', marginBottom: 20 },
-  retryButton: { backgroundColor: '#007bff', padding: 12, borderRadius: 8 },
+  retryButton: { backgroundColor: '#28a745', padding: 12, borderRadius: 10, alignItems: 'center' },
   retryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   footer: { paddingBottom: 20 },
   loadingOverlay: {

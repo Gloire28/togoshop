@@ -23,8 +23,8 @@ export default function MainTabs({ route }) {
             Home: focused ? 'home' : 'home-outline',
             Catalogue: focused ? 'list' : 'list-outline',
             Cart: focused ? 'cart' : 'cart-outline',
-            Profile: focused ? 'person' : 'person-outline',
-            Promotions: focused ? 'pricetag' : 'pricetag-outline',
+            Profil: focused ? 'person' : 'person-outline',
+            Promo: focused ? 'pricetag' : 'pricetag-outline',
             Loyalty: focused ? 'star' : 'star-outline',
           };
           const iconName = icons[route.name];
@@ -38,8 +38,8 @@ export default function MainTabs({ route }) {
       <Tab.Screen name="Home" component={HomeStack} />
       <Tab.Screen name="Catalogue" component={CatalogueStack} />
       <Tab.Screen name="Cart" component={CartStack} />
-      <Tab.Screen name="Profile" component={ProfileStack} />
-      <Tab.Screen name="Promotions" component={PromotionsStack} />
+      <Tab.Screen name="Profil" component={ProfileStack} />
+      <Tab.Screen name="Promo" component={PromotionsStack} />
       <Tab.Screen name="Loyalty" component={LoyaltyStack} />
     </Tab.Navigator>
   );

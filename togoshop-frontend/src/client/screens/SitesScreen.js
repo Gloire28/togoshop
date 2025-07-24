@@ -1,6 +1,7 @@
 import React, { useContext, useCallback, useState } from 'react';
 import { View, FlatList, StyleSheet, SafeAreaView, Text, TextInput, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { AppContext } from '../../shared/context/AppContext';
 import LocationItem from '../components/LocationItem';
 
@@ -26,34 +27,36 @@ export default function SitesScreen({ navigation }) {
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <View style={styles.searchContainer}>
-          <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Rechercher un site..."
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholderTextColor="#666"
-          />
+    <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <View style={styles.searchContainer}>
+            <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Rechercher un site..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholderTextColor="#666"
+            />
+          </View>
         </View>
-      </View>
-      <FlatList
-        data={filteredLocations}
-        renderItem={({ item }) => <LocationItem item={item} onPress={() => handleLocationPress(item._id)} />}
-        keyExtractor={(item) => item._id}
-        style={styles.list}
-        ListEmptyComponent={<Text style={styles.emptyText}>Aucun site trouvé.</Text>}
-      />
-    </SafeAreaView>
+        <FlatList
+          data={filteredLocations}
+          renderItem={({ item }) => <LocationItem item={item} onPress={() => handleLocationPress(item._id)} />}
+          keyExtractor={(item) => item._id}
+          style={styles.list}
+          ListEmptyComponent={<Text style={styles.emptyText}>Aucun site trouvé.</Text>}
+        />
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
+  gradient: { flex: 1 },
   container: {
     flex: 1,
-    backgroundColor: '#f0f4f8', 
   },
   header: {
     padding: 15,
@@ -61,6 +64,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e0e7ff',
     elevation: 4,
+    borderRadius: 10,
   },
   searchContainer: {
     flexDirection: 'row',
