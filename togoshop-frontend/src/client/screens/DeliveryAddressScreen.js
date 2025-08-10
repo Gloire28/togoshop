@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useContext } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useContext, useRef } from 'react';
+import { View, Text, TextInput, TouchableOpacity, Alert, StyleSheet, Dimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import MapView, { Marker, UrlTile } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { updateOrder } from '../../shared/services/api';
 import { AppContext } from '../../shared/context/AppContext';
@@ -62,6 +63,9 @@ export default function DeliveryAddressScreen({ route, navigation }) {
   const [deliveryInstructions, setDeliveryInstructions] = useState('');
   const [latitude, setLatitude] = useState(null);
   const [longitude, setLongitude] = useState(null);
+  const [selectedLat, setSelectedLat] = useState(null);
+  const [selectedLng, setSelectedLng] = useState(null);
+  const mapRef = useRef(null);
 
   useEffect(() => {
     if (!orderId) {
@@ -71,7 +75,6 @@ export default function DeliveryAddressScreen({ route, navigation }) {
       return;
     }
 
-    // Synchroniser les données du panier au chargement
     const loadCartData = async () => {
       try {
         const cartResponse = await fetchCart();
@@ -84,12 +87,11 @@ export default function DeliveryAddressScreen({ route, navigation }) {
     };
     loadCartData();
 
-    // Récupérer la localisation
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         console.log('Permission de localisation refusée');
-        Alert.alert('Erreur', 'Permission de localisation refusée. Utilisez des coordonnées manuelles.');
+        Alert.alert('Erreur', 'Permission de localisation refusée. Utilisez une sélection manuelle.');
         setLatitude(6.1725);
         setLongitude(1.2314);
         return;
@@ -99,29 +101,44 @@ export default function DeliveryAddressScreen({ route, navigation }) {
         let userLocation = await Location.getCurrentPositionAsync({});
         setLatitude(userLocation.coords.latitude);
         setLongitude(userLocation.coords.longitude);
-        console.log('Localisation récupérée:', { latitude: userLocation.coords.latitude, longitude: userLocation.coords.longitude });
+        setSelectedLat(userLocation.coords.latitude);
+        setSelectedLng(userLocation.coords.longitude);
+        if (mapRef.current) {
+          mapRef.current.animateToRegion({
+            latitude: userLocation.coords.latitude,
+            longitude: userLocation.coords.longitude,
+            latitudeDelta: 0.01,
+            longitudeDelta: 0.01,
+          });
+        }
       } catch (error) {
         console.error('Erreur de localisation:', error.message);
-        Alert.alert('Erreur', 'Impossible de récupérer la localisation. Utilisez des coordonnées manuelles.');
+        Alert.alert('Erreur', 'Impossible de récupérer la localisation. Utilisez une sélection manuelle.');
         setLatitude(6.1725);
         setLongitude(1.2314);
       }
     })();
-  }, [orderId, navigation, fetchCart, cart.length, loyaltyPointsUsed, loyaltyReductionAmount]);
+  }, [orderId, fetchCart]);
+
+  const onMapPress = (event) => {
+    const { coordinate } = event.nativeEvent;
+    setSelectedLat(coordinate.latitude);
+    setSelectedLng(coordinate.longitude);
+  };
 
   const handleSaveAddress = async () => {
-    if (!address.trim() || !latitude || !longitude) {
-      Alert.alert('Erreur', 'Veuillez entrer une adresse et vérifier la localisation.');
+    if (!deliveryInstructions.trim()) {
+      Alert.alert('Erreur', 'Veuillez entrer des instructions de livraison.');
       return;
     }
 
     try {
       const updatedData = {
         deliveryAddress: {
-          address,
-          lat: latitude,
-          lng: longitude,
-          instructions: deliveryInstructions || '',
+          address: address.trim() || '',
+          lat: selectedLat || latitude,
+          lng: selectedLng || longitude,
+          instructions: deliveryInstructions,
         },
         products: cart.map(item => ({
           productId: item.productId,
@@ -152,20 +169,50 @@ export default function DeliveryAddressScreen({ route, navigation }) {
           </TouchableOpacity>
           <ProgressBar currentStep={2} />
         </View>
-        <View style={styles.content}>
-          <Text style={styles.locationText}>
-            Localisation actuelle : Lat {latitude?.toFixed(4) || 'N/A'}, Lng {longitude?.toFixed(4) || 'N/A'}
-          </Text>
+        <View style={styles.mapContainer}>
+          {latitude && longitude && (
+            <MapView
+              ref={mapRef}
+              style={styles.map}
+              initialRegion={{
+                latitude: latitude,
+                longitude: longitude,
+                latitudeDelta: 0.01,
+                longitudeDelta: 0.01,
+              }}
+              onPress={onMapPress}
+            >
+              <UrlTile
+                urlTemplate="http://c.tile.openstreetmap.org/{z}/{x}/{y}.png" // URL pour OSM
+                maximumZ={19} // Zoom max, iOS only
+                flipY={false} // Pour éviter l'inversion des tuiles
+              />
+              {(selectedLat && selectedLng) && (
+                <Marker
+                  coordinate={{ latitude: selectedLat, longitude: selectedLng }}
+                  title="Position sélectionnée"
+                />
+              )}
+              {(!selectedLat && !selectedLng) && (
+                <Marker
+                  coordinate={{ latitude, longitude }}
+                  title="Position actuelle"
+                />
+              )}
+            </MapView>
+          )}
+        </View>
+        <View style={styles.inputContainer}>
           <TextInput
             style={styles.addressInput}
-            placeholder="Entrez les détails de l'adresse (ex. Rue, Quartier)"
+            placeholder="Adresse (facultatif)"
             value={address}
             onChangeText={setAddress}
             multiline
           />
           <TextInput
             style={styles.instructionsInput}
-            placeholder="Instructions pour le livreur (ex. Entrée par derrière)"
+            placeholder="Instructions pour le livreur (obligatoire)"
             value={deliveryInstructions}
             onChangeText={setDeliveryInstructions}
             multiline
@@ -195,9 +242,48 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   backButton: { marginRight: 10 },
-  content: {
-    flex: 1,
-    padding: 20,
+  mapContainer: { flex: 1, marginTop: 10 },
+  map: { width: '100%', height: '100%' },
+  inputContainer: {
+    padding: 10,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#ddd',
+    elevation: 2,
+  },
+  addressInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 10,
+    padding: 10,
+    fontSize: 14,
+    marginBottom: 10,
+    backgroundColor: '#fff',
+    height: 60,
+    textAlignVertical: 'top',
+  },
+  instructionsInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 10,
+    padding: 10,
+    fontSize: 14,
+    marginBottom: 10,
+    backgroundColor: '#fff',
+    height: 60,
+    textAlignVertical: 'top',
+  },
+  saveButton: {
+    backgroundColor: '#28a745',
+    paddingVertical: 10,
+    borderRadius: 10,
+    alignItems: 'center',
+    elevation: 2,
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   progressBarContainer: {
     flexDirection: 'row',
@@ -217,33 +303,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 5,
   },
-  progressCircleActive: {
-    backgroundColor: '#28a745',
-  },
-  progressCircleInactive: {
-    backgroundColor: '#ddd',
-  },
-  progressText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  progressTextActive: {
-    color: '#fff',
-  },
-  progressTextInactive: {
-    color: '#666',
-  },
-  progressLabel: {
-    fontSize: 10,
-    textAlign: 'center',
-  },
-  progressLabelActive: {
-    color: '#28a745',
-    fontWeight: 'bold',
-  },
-  progressLabelInactive: {
-    color: '#666',
-  },
+  progressCircleActive: { backgroundColor: '#28a745' },
+  progressCircleInactive: { backgroundColor: '#ddd' },
+  progressText: { fontSize: 12, fontWeight: 'bold' },
+  progressTextActive: { color: '#fff' },
+  progressTextInactive: { color: '#666' },
+  progressLabel: { fontSize: 10, textAlign: 'center' },
+  progressLabelActive: { color: '#28a745', fontWeight: 'bold' },
+  progressLabelInactive: { color: '#666' },
   connector: {
     position: 'absolute',
     top: 11,
@@ -252,52 +319,6 @@ const styles = StyleSheet.create({
     height: 2,
     zIndex: -1,
   },
-  connectorActive: {
-    backgroundColor: '#28a745',
-  },
-  connectorInactive: {
-    backgroundColor: '#ddd',
-  },
-  locationText: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 15,
-    fontStyle: 'italic',
-  },
-  addressInput: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    padding: 15,
-    fontSize: 16,
-    marginBottom: 20,
-    backgroundColor: '#fff',
-    elevation: 2,
-    height: 100,
-    textAlignVertical: 'top',
-  },
-  instructionsInput: {
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    padding: 15,
-    fontSize: 16,
-    marginBottom: 20,
-    backgroundColor: '#fff',
-    elevation: 2,
-    height: 80,
-    textAlignVertical: 'top',
-  },
-  saveButton: {
-    backgroundColor: '#28a745',
-    paddingVertical: 12,
-    borderRadius: 10,
-    alignItems: 'center',
-    elevation: 2,
-  },
-  saveButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
+  connectorActive: { backgroundColor: '#28a745' },
+  connectorInactive: { backgroundColor: '#ddd' },
 });

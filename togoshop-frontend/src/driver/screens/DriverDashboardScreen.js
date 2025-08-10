@@ -12,6 +12,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
+
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { getDriverInfo, updateDriverLocation, toggleDriverDiscoverable } from '../../shared/services/api';
 

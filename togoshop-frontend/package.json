@@ -9,36 +9,45 @@
     "web": "expo start --web"
   },
   "dependencies": {
+    "@expo/config-plugins": "~10.1.1",
     "@expo/metro-config": "~0.20.0",
     "@expo/vector-icons": "^14.1.0",
-    "@react-native-async-storage/async-storage": "^2.1.2",
+    "@react-native-async-storage/async-storage": "2.1.2",
     "@react-native-community/checkbox": "^0.5.20",
-    "@react-native-community/datetimepicker": "^8.4.1",
-    "@react-native-community/geolocation": "^3.4.0",
-    "@react-native-picker/picker": "^2.11.0",
+    "@react-native-community/datetimepicker": "8.4.1",
+    "@react-native-picker/picker": "2.11.1",
     "@react-navigation/bottom-tabs": "^7.3.13",
     "@react-navigation/native": "^7.1.9",
     "@react-navigation/stack": "^7.3.2",
     "axios": "^1.9.0",
-    "expo": "~53.0.9",
+    "expo": "~53.0.20",
+    "expo-asset": "~11.1.7",
+    "expo-constants": "~17.1.7",
+    "expo-file-system": "~18.1.11",
+    "expo-font": "~13.3.2",
     "expo-image-picker": "~16.1.4",
-    "expo-linear-gradient": "^14.1.4",
-    "expo-location": "~18.1.5",
+    "expo-keep-awake": "~14.1.4",
+    "expo-linear-gradient": "~14.1.5",
+    "expo-location": "~18.1.6",
     "expo-status-bar": "~2.2.3",
-    "metro": "^0.82.0",
     "react": "19.0.0",
-    "react-native": "0.79.2",
+    "react-native": "0.79.5",
     "react-native-animatable": "^1.4.0",
     "react-native-compass-heading": "^2.0.2",
-    "react-native-linear-gradient": "^2.8.3",
-    "react-native-maps": "^1.23.8",
+    "react-native-gesture-handler": "~2.24.0",
+    "react-native-maps": "~1.20.1",
     "react-native-modal-datetime-picker": "^18.0.0",
     "react-native-safe-area-context": "5.4.0",
-    "react-native-screens": "~4.10.0",
+    "react-native-screens": "~4.11.1",
     "react-native-vector-icons": "^10.2.0"
   },
   "devDependencies": {
-    "@babel/core": "^7.25.2"
+    "@babel/core": "^7.25.2",
+    "yarn": "^1.22.22"
+  },
+  "resolutions": {
+    "metro": "0.76.8",
+    "@expo/metro-config": "0.18.0"
   },
   "private": true
 }

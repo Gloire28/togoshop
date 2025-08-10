@@ -10,19 +10,25 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { getDriverOrders, acceptOrder, rejectOrder, updateDriverOrderStatus, reportDeliveryIssue } from '../../shared/services/api';
+import MapView, { Marker } from 'react-native-maps';
 
 export default function DriverOrderScreen({ navigation }) {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [currentLocation] = useState({ lat: 6.1700, lng: 1.2300 }); // Position simulée (ex. Lomé)
+  const [currentLocation, setCurrentLocation] = useState({ lat: 6.1700, lng: 1.2300 }); // Position simulée (ex. Lomé)
 
   useEffect(() => {
     console.log('useEffect appelé pour fetchOrders');
     fetchOrders();
 
-    // Simulation de mise à jour toutes les 2 minutes
+    // Simulation de mise à jour de la position toutes les 2 minutes
     const locationInterval = setInterval(() => {
-      console.log('Mise à jour simulée de la position toutes les 2 minutes');
+      const randomOffset = (Math.random() - 0.5) * 0.01; // Variation aléatoire de ±0.005
+      setCurrentLocation(prev => ({
+        lat: prev.lat + randomOffset,
+        lng: prev.lng + randomOffset,
+      }));
+      console.log('Mise à jour simulée de la position:', currentLocation);
     }, 120000); // 2 minutes
 
     return () => clearInterval(locationInterval);
@@ -156,6 +162,8 @@ export default function DriverOrderScreen({ navigation }) {
     let distance = 0;
     let direction = 'Inconnue';
     let estimatedTime = '';
+    let destinationLat = null;
+    let destinationLng = null;
 
     if (currentLocation) {
       if (item.status === 'ready_for_pickup' && supermarketLat && supermarketLng) {
@@ -173,6 +181,8 @@ export default function DriverOrderScreen({ navigation }) {
         );
         const time = estimateTime(distance);
         estimatedTime = `Temps estimé : ${time} min`;
+        destinationLat = supermarketLat;
+        destinationLng = supermarketLng;
       } else if (item.status === 'in_delivery' && deliveryLat && deliveryLng) {
         distance = calculateDistance(
           currentLocation.lat,
@@ -188,6 +198,8 @@ export default function DriverOrderScreen({ navigation }) {
         );
         const time = estimateTime(distance);
         estimatedTime = `Temps estimé : ${time} min`;
+        destinationLat = deliveryLat;
+        destinationLng = deliveryLng;
       }
     }
 
@@ -228,6 +240,35 @@ export default function DriverOrderScreen({ navigation }) {
           </Text>
           {estimatedTime && <Text style={styles.orderText}>{estimatedTime}</Text>}
         </View>
+
+        {/* Carte conditionnelle */}
+        {(item.status === 'ready_for_pickup' || item.status === 'in_delivery') && (
+          <View style={styles.mapContainer}>
+            <MapView
+              style={styles.map}
+              provider="openstreetmap"
+              initialRegion={{
+                latitude: currentLocation.lat,
+                longitude: currentLocation.lng,
+                latitudeDelta: 0.02,
+                longitudeDelta: 0.02,
+              }}
+            >
+              <Marker
+                coordinate={currentLocation}
+                title="Votre position"
+                pinColor="#34D399"
+              />
+              {destinationLat && destinationLng && (
+                <Marker
+                  coordinate={{ latitude: destinationLat, longitude: destinationLng }}
+                  title={item.status === 'ready_for_pickup' ? 'Supermarché' : 'Adresse de livraison'}
+                  pinColor="#60A5FA"
+                />
+              )}
+            </MapView>
+          </View>
+        )}
 
         {/* Actions selon le statut */}
         <View style={styles.actionContainer}>
@@ -448,5 +489,14 @@ const styles = StyleSheet.create({
     color: '#6B7280',
     marginTop: 12,
     fontFamily: 'Poppins-Regular',
+  },
+  mapContainer: {
+    height: 150,
+    marginBottom: 12,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  map: {
+    ...StyleSheet.absoluteFillObject,
   },
 });

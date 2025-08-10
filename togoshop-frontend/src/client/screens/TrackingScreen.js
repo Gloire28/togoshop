@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Alert, Animated, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Alert, Animated, TouchableOpacity, ScrollView, Dimensions } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { getOrderDetails, cancelOrder } from '../../shared/services/api';
+import MapView, { Marker } from 'react-native-maps';
 
 export default function TrackingScreen({ navigation, route }) {
   const [order, setOrder] = useState(null);
@@ -51,8 +52,11 @@ export default function TrackingScreen({ navigation, route }) {
     };
 
     fetchOrderDetails();
-
-    return () => { isMounted = false; };
+    const interval = setInterval(fetchOrderDetails, 30000); // Rafraîchir toutes les 30 secondes
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, [orderId]);
 
   const handleCancelOrder = async () => {
@@ -122,7 +126,6 @@ export default function TrackingScreen({ navigation, route }) {
     }
   };
 
-  // Calculer le total affiché (subtotal - loyaltyReductionAmount)
   const calculateDisplayTotal = () => {
     const subtotal = order?.subtotal || 0;
     const loyaltyReductionAmount = order?.loyaltyReductionAmount || 0;
@@ -200,16 +203,49 @@ export default function TrackingScreen({ navigation, route }) {
               </Text>
             </View>
             {(order.status === 'in_delivery' || order.status === 'ready_for_pickup') && (
-              <View style={styles.validationCodeContainer}>
-                <Text style={styles.validationCodeLabel}>Code de validation pour le livreur :</Text>
-                <Text style={styles.validationCode}>{order.validationCode || 'Non disponible'}</Text>
-                {order.validationCode === 'Non disponible' ? (
-                  <Text style={styles.errorText}>Le code de validation n'est pas disponible. Veuillez contacter le support.</Text>
-                ) : (
-                  <Text style={styles.validationCodeInstruction}>
-                    Veuillez partager ce code avec le livreur pour confirmer la livraison.
-                  </Text>
-                )}
+              <View>
+                <View style={styles.validationCodeContainer}>
+                  <Text style={styles.validationCodeLabel}>Code de validation pour le livreur :</Text>
+                  <Text style={styles.validationCode}>{order.validationCode || 'Non disponible'}</Text>
+                  {order.validationCode === 'Non disponible' ? (
+                    <Text style={styles.errorText}>Le code de validation n'est pas disponible. Veuillez contacter le support.</Text>
+                  ) : (
+                    <Text style={styles.validationCodeInstruction}>
+                      Veuillez partager ce code avec le livreur pour confirmer la livraison.
+                    </Text>
+                  )}
+                </View>
+                <View style={styles.mapContainer}>
+                  <MapView
+                    style={styles.map}
+                    provider="openstreetmap"
+                    initialRegion={{
+                      latitude: order.deliveryAgentLocation?.lat || order.deliveryAddress?.lat || 6.1725,
+                      longitude: order.deliveryAgentLocation?.lng || order.deliveryAddress?.lng || 1.2314,
+                      latitudeDelta: 0.01,
+                      longitudeDelta: 0.01,
+                    }}
+                  >
+                    {order.deliveryAgentLocation?.lat && order.deliveryAgentLocation?.lng && (
+                      <Marker
+                        coordinate={{
+                          latitude: order.deliveryAgentLocation.lat,
+                          longitude: order.deliveryAgentLocation.lng,
+                        }}
+                        title="Position du livreur"
+                      />
+                    )}
+                    {order.deliveryAddress?.lat && order.deliveryAddress?.lng && (
+                      <Marker
+                        coordinate={{
+                          latitude: order.deliveryAddress.lat,
+                          longitude: order.deliveryAddress.lng,
+                        }}
+                        title="Adresse de livraison"
+                      />
+                    )}
+                  </MapView>
+                </View>
               </View>
             )}
           </View>
@@ -365,5 +401,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     textAlign: 'center',
+  },
+  mapContainer: {
+    height: 200,
+    marginTop: 10,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  map: {
+    ...StyleSheet.absoluteFillObject,
   },
 });

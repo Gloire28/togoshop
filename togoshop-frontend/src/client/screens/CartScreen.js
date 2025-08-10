@@ -15,7 +15,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AppContext } from '../../shared/context/AppContext';
 import { updateOrder, getUserLoyalty } from '../../shared/services/api';
-import imageMap from '../../assets/imageMap';
 import debounce from 'lodash.debounce';
 
 // Composant pour la barre de progression

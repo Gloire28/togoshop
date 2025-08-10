@@ -6,8 +6,9 @@
     "sdkVersion": "53.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
+    "permissions": ["LOCATION"],
     "splash": {
-      "image": "./assets/logo.png",
+      "image": "./src/assets/logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
@@ -15,34 +16,28 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.togoshop.frontend",
-      "infoPlist": { 
-        "NSLocationWhenInUseUsageDescription": "Nous avons besoin de votre position pour afficher votre adresse de livraison sur la carte.",
-        "NSPhotoLibraryUsageDescription": "L'application a besoin d'accéder à votre galerie pour sélectionner des images de produits."
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "L'application a besoin d'accéder à votre galerie pour sélectionner des images de produits.",
+        "NSLocationWhenInUseUsageDescription": "L'application a besoin d'accéder à votre localisation pour définir l'adresse de livraison."
       }
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./src/assets/logo.png",
         "backgroundColor": "#ffffff"
       },
-      "permissions": [
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION",
-        "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE",
-        "READ_MEDIA_IMAGES"
-      ]
+      "package": "com.gloir28.togoshop",
+      "permissions": ["READ_MEDIA_IMAGES", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "INTERNET"]
     },
     "web": {
-      "favicon": "./assets/favicon.png",
       "bundler": "metro"
     },
-    "plugins": [
-      "expo-location",
-      "react-native-maps"
-    ],
     "extra": {
-      "locale": "fr" 
-    }
+      "locale": "fr",
+      "eas": {
+        "projectId": "5790b873-68a0-4e9b-8147-e77de4a1b2d0"
+      }
+    },
+    "jsEngine": "hermes" 
   }
 }

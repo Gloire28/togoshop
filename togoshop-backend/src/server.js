@@ -36,6 +36,7 @@ const express = require('express');
      'exp://192.168.1.89:19000',
      'http://localhost:8081',
      /^exp:\/\/.+$/,
+     'https://44139496f2e4.ngrok-free.app'
    ];
 
    // Configuration CORS
@@ -137,7 +138,7 @@ const express = require('express');
    });
 
    // Tâches planifiées avec node-cron
-   cron.schedule('*/1 * * * *', async () => {
+   cron.schedule('*/5 * * * *', async () => {
      try {
        await autoAssignDrivers();
        console.log(`[${new Date().toISOString()}] Auto-assignation des livreurs effectuée`);

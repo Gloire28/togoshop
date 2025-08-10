@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BASE_URL = 'http://192.168.1.89:5000/api';
+const BASE_URL = 'https://44139496f2e4.ngrok-free.app/api';
 
 export const apiRequest = async (endpoint, options = {}) => {
   const { method = 'GET', body = null, isFormData = false } = options;
