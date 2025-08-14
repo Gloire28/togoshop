@@ -36,7 +36,7 @@ const express = require('express');
      'exp://192.168.1.89:19000',
      'http://localhost:8081',
      /^exp:\/\/.+$/,
-     'https://44139496f2e4.ngrok-free.app'
+     'https://4c8b4341082f.ngrok-free.app'
    ];
 
    // Configuration CORS

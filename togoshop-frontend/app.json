@@ -6,19 +6,25 @@
     "sdkVersion": "53.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "permissions": ["LOCATION"],
+    "permissions": [
+      "LOCATION"
+    ],
     "splash": {
       "image": "./src/assets/logo.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.togoshop.frontend",
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "L'application a besoin d'accéder à votre galerie pour sélectionner des images de produits.",
-        "NSLocationWhenInUseUsageDescription": "L'application a besoin d'accéder à votre localisation pour définir l'adresse de livraison."
+        "NSLocationWhenInUseUsageDescription": "L'application a besoin d'accéder à votre localisation pour définir l'adresse de livraison.",
+        "GoogleMapsApiKey": "AIzaSyAZtiiuu7PYM_2xd7NQu_DnyU2-5xjR7gw",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -27,7 +33,17 @@
         "backgroundColor": "#ffffff"
       },
       "package": "com.gloir28.togoshop",
-      "permissions": ["READ_MEDIA_IMAGES", "ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "INTERNET"]
+      "permissions": [
+        "READ_MEDIA_IMAGES",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "INTERNET"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyAZtiiuu7PYM_2xd7NQu_DnyU2-5xjR7gw"
+        }
+      }
     },
     "web": {
       "bundler": "metro"
@@ -38,6 +54,6 @@
         "projectId": "5790b873-68a0-4e9b-8147-e77de4a1b2d0"
       }
     },
-    "jsEngine": "hermes" 
+    "jsEngine": "hermes"
   }
 }

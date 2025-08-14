@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web"
   },
   "dependencies": {
@@ -25,7 +25,7 @@
     "expo-constants": "~17.1.7",
     "expo-file-system": "~18.1.11",
     "expo-font": "~13.3.2",
-    "expo-image-picker": "~16.1.4",
+    "expo-image-picker": "^16.1.4",
     "expo-keep-awake": "~14.1.4",
     "expo-linear-gradient": "~14.1.5",
     "expo-location": "~18.1.6",
@@ -35,7 +35,7 @@
     "react-native-animatable": "^1.4.0",
     "react-native-compass-heading": "^2.0.2",
     "react-native-gesture-handler": "~2.24.0",
-    "react-native-maps": "~1.20.1",
+    "react-native-maps": "1.20.1",
     "react-native-modal-datetime-picker": "^18.0.0",
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",

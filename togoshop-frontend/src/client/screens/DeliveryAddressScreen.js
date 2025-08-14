@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useContext, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, Alert, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import MapView, { Marker, UrlTile } from 'react-native-maps';
+import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { updateOrder } from '../../shared/services/api';
 import { AppContext } from '../../shared/context/AppContext';
@@ -68,6 +68,7 @@ export default function DeliveryAddressScreen({ route, navigation }) {
   const mapRef = useRef(null);
 
   useEffect(() => {
+    console.log('useEffect démarré, orderId:', orderId);
     if (!orderId) {
       console.log('Erreur: orderId manquant dans route.params');
       Alert.alert('Erreur', 'Aucune commande valide trouvée. Retournez au panier.');
@@ -78,10 +79,10 @@ export default function DeliveryAddressScreen({ route, navigation }) {
     const loadCartData = async () => {
       try {
         const cartResponse = await fetchCart();
-        console.log('Réponse fetchCart dans DeliveryAddressScreen:', JSON.stringify(cartResponse, null, 2));
+        console.log('Réponse fetchCart:', JSON.stringify(cartResponse, null, 2));
         console.log('Données reçues:', { orderId, cartLength: cart.length, loyaltyPointsUsed, loyaltyReductionAmount });
       } catch (error) {
-        console.error('Erreur lors de la synchronisation du panier:', error.message);
+        console.error('Erreur panier:', error.message);
         Alert.alert('Erreur', 'Impossible de synchroniser le panier : ' + error.message);
       }
     };
@@ -89,11 +90,13 @@ export default function DeliveryAddressScreen({ route, navigation }) {
 
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
+      console.log('Statut de la permission de localisation:', status);
       if (status !== 'granted') {
         console.log('Permission de localisation refusée');
         Alert.alert('Erreur', 'Permission de localisation refusée. Utilisez une sélection manuelle.');
         setLatitude(6.1725);
         setLongitude(1.2314);
+        console.log('Coordonnées par défaut appliquées:', { latitude: 6.1725, longitude: 1.2314 });
         return;
       }
 
@@ -103,6 +106,7 @@ export default function DeliveryAddressScreen({ route, navigation }) {
         setLongitude(userLocation.coords.longitude);
         setSelectedLat(userLocation.coords.latitude);
         setSelectedLng(userLocation.coords.longitude);
+        console.log('Localisation obtenue:', { latitude: userLocation.coords.latitude, longitude: userLocation.coords.longitude });
         if (mapRef.current) {
           mapRef.current.animateToRegion({
             latitude: userLocation.coords.latitude,
@@ -110,12 +114,14 @@ export default function DeliveryAddressScreen({ route, navigation }) {
             latitudeDelta: 0.01,
             longitudeDelta: 0.01,
           });
+          console.log('Animation de région effectuée');
         }
       } catch (error) {
         console.error('Erreur de localisation:', error.message);
         Alert.alert('Erreur', 'Impossible de récupérer la localisation. Utilisez une sélection manuelle.');
         setLatitude(6.1725);
         setLongitude(1.2314);
+        console.log('Coordonnées par défaut appliquées après erreur:', { latitude: 6.1725, longitude: 1.2314 });
       }
     })();
   }, [orderId, fetchCart]);
@@ -124,6 +130,7 @@ export default function DeliveryAddressScreen({ route, navigation }) {
     const { coordinate } = event.nativeEvent;
     setSelectedLat(coordinate.latitude);
     setSelectedLng(coordinate.longitude);
+    console.log('Position sélectionnée:', { latitude: coordinate.latitude, longitude: coordinate.longitude });
   };
 
   const handleSaveAddress = async () => {
@@ -171,6 +178,7 @@ export default function DeliveryAddressScreen({ route, navigation }) {
         </View>
         <View style={styles.mapContainer}>
           {latitude && longitude && (
+            console.log('Rendu de MapView avec:', { latitude, longitude }),
             <MapView
               ref={mapRef}
               style={styles.map}
@@ -181,12 +189,8 @@ export default function DeliveryAddressScreen({ route, navigation }) {
                 longitudeDelta: 0.01,
               }}
               onPress={onMapPress}
+              onError={(error) => console.log('Erreur MapView:', error)}
             >
-              <UrlTile
-                urlTemplate="http://c.tile.openstreetmap.org/{z}/{x}/{y}.png" // URL pour OSM
-                maximumZ={19} // Zoom max, iOS only
-                flipY={false} // Pour éviter l'inversion des tuiles
-              />
               {(selectedLat && selectedLng) && (
                 <Marker
                   coordinate={{ latitude: selectedLat, longitude: selectedLng }}
@@ -242,8 +246,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   backButton: { marginRight: 10 },
-  mapContainer: { flex: 1, marginTop: 10 },
-  map: { width: '100%', height: '100%' },
+  mapContainer: { flex: 0, marginTop: 10, height: 400, width: '100%', backgroundColor: 'yellow' },
+  map: { width: '100%', height: 400, backgroundColor: 'blue' },
   inputContainer: {
     padding: 10,
     backgroundColor: '#fff',

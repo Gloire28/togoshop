@@ -1,37 +1,53 @@
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  ActivityIndicator,
-  Alert,
-  TouchableOpacity,
-} from 'react-native';
-import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-import { getDriverOrders, acceptOrder, rejectOrder, updateDriverOrderStatus, reportDeliveryIssue } from '../../shared/services/api';
+import React, { useState, useEffect, useContext, useRef } from 'react';
+import { View, Text, StyleSheet, FlatList, ActivityIndicator, Alert } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import MapView, { Marker } from 'react-native-maps';
+import * as Location from 'expo-location';
+import { getDriverOrders, acceptOrder, rejectOrder, updateDriverOrderStatus, reportDeliveryIssue } from '../../shared/services/api';
+import { AppContext } from '../../shared/context/AppContext';
 
-export default function DriverOrderScreen({ navigation }) {
+const DriverOrderScreen = ({ navigation }) => {
+  const { fetchCart } = useContext(AppContext); // Ajout pour synchronisation si nécessaire
   const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [currentLocation, setCurrentLocation] = useState({ lat: 6.1700, lng: 1.2300 }); // Position simulée (ex. Lomé)
+  const [loading, setLoading] = useState(true);
+  const [currentLocation, setCurrentLocation] = useState(null);
+  const mapRef = useRef(null);
 
   useEffect(() => {
-    console.log('useEffect appelé pour fetchOrders');
-    fetchOrders();
+    const loadLocationAndOrders = async () => {
+      console.log('useEffect démarré pour charger localisation et commandes');
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('Permission de localisation refusée');
+        Alert.alert('Erreur', 'Permission de localisation refusée. Utilisation de coordonnées par défaut.');
+        setCurrentLocation({ latitude: 6.1700, longitude: 1.2300 });
+      } else {
+        try {
+          let userLocation = await Location.getCurrentPositionAsync({});
+          setCurrentLocation({
+            latitude: userLocation.coords.latitude,
+            longitude: userLocation.coords.longitude,
+          });
+          console.log('Localisation obtenue:', userLocation.coords);
+          if (mapRef.current) {
+            mapRef.current.animateToRegion({
+              latitude: userLocation.coords.latitude,
+              longitude: userLocation.coords.longitude,
+              latitudeDelta: 0.02,
+              longitudeDelta: 0.02,
+            });
+          }
+        } catch (error) {
+          console.error('Erreur de localisation:', error.message);
+          Alert.alert('Erreur', 'Impossible de récupérer la localisation. Coordonnées par défaut utilisées.');
+          setCurrentLocation({ latitude: 6.1700, longitude: 1.2300 });
+        }
+      }
 
-    // Simulation de mise à jour de la position toutes les 2 minutes
-    const locationInterval = setInterval(() => {
-      const randomOffset = (Math.random() - 0.5) * 0.01; // Variation aléatoire de ±0.005
-      setCurrentLocation(prev => ({
-        lat: prev.lat + randomOffset,
-        lng: prev.lng + randomOffset,
-      }));
-      console.log('Mise à jour simulée de la position:', currentLocation);
-    }, 120000); // 2 minutes
-
-    return () => clearInterval(locationInterval);
+      await fetchOrders();
+    };
+    loadLocationAndOrders();
   }, []);
 
   const fetchOrders = async () => {
@@ -39,10 +55,10 @@ export default function DriverOrderScreen({ navigation }) {
     try {
       const response = await getDriverOrders();
       console.log('Données reçues par fetchOrders:', response);
-      // Exclure explicitement les commandes delivered
       const filteredOrders = (response || []).filter(order => order.status !== 'delivered');
       setOrders(filteredOrders);
     } catch (error) {
+      console.error('Erreur API:', error.message);
       Alert.alert('Erreur', 'Impossible de charger les commandes');
     } finally {
       setLoading(false);
@@ -85,7 +101,7 @@ export default function DriverOrderScreen({ navigation }) {
 
   const reportDeliveryIssueHandler = async (orderId, issueDetails) => {
     try {
-      await reportDeliveryIssue(orderId, issueDetails);
+      await reportDeliveryIssue(orderId, issueDetails || 'Problème non spécifié');
       Alert.alert('Succès', 'Problème signalé avec succès');
       fetchOrders();
     } catch (error) {
@@ -93,239 +109,140 @@ export default function DriverOrderScreen({ navigation }) {
     }
   };
 
-  // Fonction pour calculer la distance euclidienne (en km)
   const calculateDistance = (lat1, lng1, lat2, lng2) => {
     if (!lat1 || !lng1 || !lat2 || !lng2) return 0;
-
-    const R = 6371; // Rayon de la Terre en km
+    const R = 6371;
     const dLat = (lat2 - lat1) * (Math.PI / 180);
     const dLng = (lng2 - lng1) * (Math.PI / 180);
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1 * (Math.PI / 180)) *
-      Math.cos(lat2 * (Math.PI / 180)) *
-      Math.sin(dLng / 2) *
-      Math.sin(dLng / 2);
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    const distance = R * c; // Distance en km
-    return distance.toFixed(2); // Arrondi à 2 décimales
+    return (R * c).toFixed(2);
   };
 
-  // Fonction pour estimer le temps d’arrivée (vitesse = 40 km/h)
   const estimateTime = (distance) => {
-    const speed = 40; // Vitesse moyenne en km/h
-    const timeInHours = distance / speed; // Temps en heures
-    const timeInMinutes = timeInHours * 60; // Temps en minutes
-    return Math.max(1, Math.round(timeInMinutes)); // Minimum 1 minute
+    const speed = 40;
+    const timeInMinutes = (distance / speed) * 60;
+    return Math.max(1, Math.round(timeInMinutes));
   };
 
-  // Fonction pour déterminer la direction
   const getDirection = (lat1, lng1, lat2, lng2) => {
     if (!lat1 || !lng1 || !lat2 || !lng2) return 'Inconnue';
-
     const dLat = lat2 - lat1;
     const dLng = lng2 - lng1;
-
-    if (dLat > 0 && dLng > 0) return 'Vers le nord-est';
-    if (dLat > 0 && dLng < 0) return 'Vers le nord-ouest';
-    if (dLat < 0 && dLng > 0) return 'Vers le sud-est';
-    if (dLat < 0 && dLng < 0) return 'Vers le sud-ouest';
-    if (dLat > 0 && dLng === 0) return 'Vers le nord';
-    if (dLat < 0 && dLng === 0) return 'Vers le sud';
-    if (dLat === 0 && dLng > 0) return 'Vers l’est';
-    if (dLat === 0 && dLng < 0) return 'Vers l’ouest';
+    if (dLat > 0 && dLng > 0) return 'Nord-est';
+    if (dLat > 0 && dLng < 0) return 'Nord-ouest';
+    if (dLat < 0 && dLng > 0) return 'Sud-est';
+    if (dLat < 0 && dLng < 0) return 'Sud-ouest';
+    if (dLat > 0 && dLng === 0) return 'Nord';
+    if (dLat < 0 && dLng === 0) return 'Sud';
+    if (dLat === 0 && dLng > 0) return 'Est';
+    if (dLat === 0 && dLng < 0) return 'Ouest';
     return 'Inconnue';
   };
 
   const renderOrder = ({ item }) => {
-    console.log('Rendu de l\'ordre:', item); // Débogage pour vérifier le statut
     const statusStyles = {
-      validated: { backgroundColor: '#FCD34D', icon: 'clock-outline', label: 'Assignée' },
-      ready_for_pickup: { backgroundColor: '#60A5FA', icon: 'package-variant', label: 'Prête' },
-      in_delivery: { backgroundColor: '#34D399', icon: 'truck-delivery', label: 'En livraison' },
-      delivered: { backgroundColor: '#A3BFFA', icon: 'check-circle', label: 'Livré' },
+      validated: { backgroundColor: '#FCD34D', icon: 'clock', label: 'Assignée' },
+      ready_for_pickup: { backgroundColor: '#60A5FA', icon: 'cart', label: 'Prête' },
+      in_delivery: { backgroundColor: '#34D399', icon: 'car', label: 'En livraison' },
+      delivered: { backgroundColor: '#A3BFFA', icon: 'checkmark', label: 'Livré' },
     };
 
-    const status = statusStyles[item.status] || { backgroundColor: '#9CA3AF', icon: 'help-circle', label: 'Inconnu' };
-
-    // Trouver l'adresse et les coordonnées du supermarché via locationId
+    const status = statusStyles[item.status] || { backgroundColor: '#9CA3AF', icon: 'help', label: 'Inconnu' };
     const supermarketLocation = item.supermarketId?.locations?.find(loc => loc._id === item.locationId);
     const supermarketAddress = supermarketLocation?.address || 'Adresse non définie';
     const supermarketLat = supermarketLocation?.latitude;
     const supermarketLng = supermarketLocation?.longitude;
-
-    // Coordonnées de livraison
     const deliveryLat = item.deliveryAddress?.lat;
     const deliveryLng = item.deliveryAddress?.lng;
 
-    // Calcul de la distance et direction selon le statut
-    let distance = 0;
-    let direction = 'Inconnue';
-    let estimatedTime = '';
-    let destinationLat = null;
-    let destinationLng = null;
-
+    let distance = 0, direction = 'Inconnue', estimatedTime = '', destinationLat = null, destinationLng = null;
     if (currentLocation) {
       if (item.status === 'ready_for_pickup' && supermarketLat && supermarketLng) {
-        distance = calculateDistance(
-          currentLocation.lat,
-          currentLocation.lng,
-          supermarketLat,
-          supermarketLng
-        );
-        direction = getDirection(
-          currentLocation.lat,
-          currentLocation.lng,
-          supermarketLat,
-          supermarketLng
-        );
-        const time = estimateTime(distance);
-        estimatedTime = `Temps estimé : ${time} min`;
+        distance = calculateDistance(currentLocation.latitude, currentLocation.longitude, supermarketLat, supermarketLng);
+        direction = getDirection(currentLocation.latitude, currentLocation.longitude, supermarketLat, supermarketLng);
+        estimatedTime = `Temps estimé : ${estimateTime(distance)} min`;
         destinationLat = supermarketLat;
         destinationLng = supermarketLng;
       } else if (item.status === 'in_delivery' && deliveryLat && deliveryLng) {
-        distance = calculateDistance(
-          currentLocation.lat,
-          currentLocation.lng,
-          deliveryLat,
-          deliveryLng
-        );
-        direction = getDirection(
-          currentLocation.lat,
-          currentLocation.lng,
-          deliveryLat,
-          deliveryLng
-        );
-        const time = estimateTime(distance);
-        estimatedTime = `Temps estimé : ${time} min`;
+        distance = calculateDistance(currentLocation.latitude, currentLocation.longitude, deliveryLat, deliveryLng);
+        direction = getDirection(currentLocation.latitude, currentLocation.longitude, deliveryLat, deliveryLng);
+        estimatedTime = `Temps estimé : ${estimateTime(distance)} min`;
         destinationLat = deliveryLat;
         destinationLng = deliveryLng;
       }
     }
 
-    // Affichage de la récupération avec distance et direction
-    const retrievalText = item.status === 'ready_for_pickup' || item.status === 'in_delivery'
-      ? `Récupération : ${item.supermarketId?.name || 'Supermarché Inconnu'} (${supermarketAddress}, ~${distance} km, ${direction})`
-      : `Récupération : ${item.supermarketId?.name || 'Supermarché Inconnu'} (${supermarketAddress})`;
+    const retrievalText = `Récupération : ${item.supermarketId?.name || 'Supermarché Inconnu'} (${supermarketAddress}${distance > 0 ? `, ~${distance} km, ${direction}` : ''})`;
 
     return (
       <View style={styles.orderCard}>
-        {/* En-tête avec ID et statut */}
         <View style={styles.orderHeader}>
           <Text style={styles.orderId}># {item._id.substring(0, 8)}...</Text>
           <View style={[styles.statusBadge, { backgroundColor: status.backgroundColor }]}>
-            <Icon name={status.icon} size={14} color="#fff" style={styles.statusIcon} />
+            <Ionicons name={status.icon} size={14} color="#fff" />
             <Text style={styles.statusText}>{status.label}</Text>
           </View>
         </View>
-
-        {/* Informations pour tous les statuts */}
         <View style={styles.orderDetails}>
-          <Text style={styles.orderText}>
-            <Icon name="map-marker" size={16} color="#4B5563" /> 
-            {item.deliveryAddress?.address || 'Adresse non définie'} 
-            {item.deliveryAddress?.instructions ? ` (${item.deliveryAddress.instructions})` : ''}
-          </Text>
-          <Text style={styles.orderText}>
-            <Icon name="cash" size={16} color="#4B5563" /> Paiement: {item.paymentMethod || 'Non défini'}
-          </Text>
-          <Text style={styles.orderText}>
-            <Icon name="truck" size={16} color="#4B5563" /> Frais: {item.deliveryFee} FCFA
-          </Text>
-          <Text style={styles.orderText}>
-            <Icon name="account" size={16} color="#4B5563" /> {item.clientId?.name || item.clientId?.email || 'Client Inconnu'}
-          </Text>
-          <Text style={styles.orderText}>
-            <Icon name="store" size={16} color="#4B5563" /> {retrievalText}
-          </Text>
+          <Text style={styles.orderText}><Ionicons name="location" size={16} color="#4B5563" /> {item.deliveryAddress?.address || 'Adresse non définie'} {item.deliveryAddress?.instructions ? ` (${item.deliveryAddress.instructions})` : ''}</Text>
+          <Text style={styles.orderText}><Ionicons name="cash" size={16} color="#4B5563" /> Paiement: {item.paymentMethod || 'Non défini'}</Text>
+          <Text style={styles.orderText}><Ionicons name="car" size={16} color="#4B5563" /> Frais: {item.deliveryFee} FCFA</Text>
+          <Text style={styles.orderText}><Ionicons name="person" size={16} color="#4B5563" /> {item.clientId?.name || item.clientId?.email || 'Client Inconnu'}</Text>
+          <Text style={styles.orderText}><Ionicons name="store" size={16} color="#4B5563" /> {retrievalText}</Text>
           {estimatedTime && <Text style={styles.orderText}>{estimatedTime}</Text>}
         </View>
-
-        {/* Carte conditionnelle */}
-        {(item.status === 'ready_for_pickup' || item.status === 'in_delivery') && (
+        {(item.status === 'ready_for_pickup' || item.status === 'in_delivery') && currentLocation && (
           <View style={styles.mapContainer}>
             <MapView
+              ref={mapRef}
               style={styles.map}
-              provider="openstreetmap"
               initialRegion={{
-                latitude: currentLocation.lat,
-                longitude: currentLocation.lng,
+                latitude: currentLocation.latitude,
+                longitude: currentLocation.longitude,
                 latitudeDelta: 0.02,
                 longitudeDelta: 0.02,
               }}
+              onError={(error) => console.log('Erreur MapView:', error)}
             >
-              <Marker
-                coordinate={currentLocation}
-                title="Votre position"
-                pinColor="#34D399"
-              />
+              <Marker coordinate={currentLocation} title="Votre position" pinColor="#34D399" />
               {destinationLat && destinationLng && (
-                <Marker
-                  coordinate={{ latitude: destinationLat, longitude: destinationLng }}
-                  title={item.status === 'ready_for_pickup' ? 'Supermarché' : 'Adresse de livraison'}
-                  pinColor="#60A5FA"
-                />
+                <Marker coordinate={{ latitude: destinationLat, longitude: destinationLng }} title={item.status === 'ready_for_pickup' ? 'Supermarché' : 'Adresse de livraison'} pinColor="#60A5FA" />
               )}
             </MapView>
           </View>
         )}
-
-        {/* Actions selon le statut */}
         <View style={styles.actionContainer}>
           {item.status === 'validated' && (
             <View style={styles.actionRow}>
-              <TouchableOpacity
-                style={[styles.actionButton, styles.acceptButton]}
-                onPress={() => acceptOrderHandler(item._id)}
-              >
-                <Icon name="check" size={16} color="#fff" style={styles.buttonIcon} />
+              <TouchableOpacity style={[styles.actionButton, styles.acceptButton]} onPress={() => acceptOrderHandler(item._id)}>
+                <Ionicons name="checkmark" size={16} color="#fff" />
                 <Text style={styles.buttonText}>Accepter</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.actionButton, styles.rejectButton]}
-                onPress={() => rejectOrderHandler(item._id)}
-              >
-                <Icon name="close" size={16} color="#fff" style={styles.buttonIcon} />
+              <TouchableOpacity style={[styles.actionButton, styles.rejectButton]} onPress={() => rejectOrderHandler(item._id)}>
+                <Ionicons name="close" size={16} color="#fff" />
                 <Text style={styles.buttonText}>Rejeter</Text>
               </TouchableOpacity>
             </View>
           )}
           {item.status === 'ready_for_pickup' && (
-            <TouchableOpacity
-              style={[styles.actionButton, styles.inDeliveryButton]}
-              onPress={() => markAsInDelivery(item._id)}
-            >
-              <Icon name="truck-delivery" size={16} color="#fff" style={styles.buttonIcon} />
+            <TouchableOpacity style={[styles.actionButton, styles.inDeliveryButton]} onPress={() => markAsInDelivery(item._id)}>
+              <Ionicons name="car" size={16} color="#fff" />
               <Text style={styles.buttonText}>Marquer comme En Livraison</Text>
             </TouchableOpacity>
           )}
           {item.status === 'in_delivery' && (
             <View style={styles.actionRow}>
-              <TouchableOpacity
-                style={[styles.actionButton, styles.deliveredButton]}
-                onPress={() => markAsDelivered(item._id)}
-              >
-                <Icon name="check-circle" size={16} color="#fff" style={styles.buttonIcon} />
+              <TouchableOpacity style={[styles.actionButton, styles.deliveredButton]} onPress={() => markAsDelivered(item._id)}>
+                <Ionicons name="checkmark-circle" size={16} color="#fff" />
                 <Text style={styles.buttonText}>Valider la Livraison</Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.actionButton, styles.reportButton]}
-                onPress={() =>
-                  Alert.prompt(
-                    'Signaler un Problème',
-                    'Décrivez le problème',
-                    [
-                      { text: 'Annuler', style: 'cancel' },
-                      {
-                        text: 'Envoyer',
-                        onPress: (issueDetails) => reportDeliveryIssueHandler(item._id, issueDetails || 'Problème non spécifié'),
-                      },
-                    ],
-                    'plain-text'
-                  )
-                }
-              >
-                <Icon name="alert-circle" size={16} color="#fff" style={styles.buttonIcon} />
+              <TouchableOpacity style={[styles.actionButton, styles.reportButton]} onPress={() => Alert.prompt('Signaler un Problème', 'Décrivez le problème', [
+                { text: 'Annuler', style: 'cancel' },
+                { text: 'Envoyer', onPress: (issueDetails) => reportDeliveryIssueHandler(item._id, issueDetails || 'Problème non spécifié') },
+              ], 'plain-text')}>
+                <Ionicons name="alert" size={16} color="#fff" />
                 <Text style={styles.buttonText}>Signaler</Text>
               </TouchableOpacity>
             </View>
@@ -336,167 +253,51 @@ export default function DriverOrderScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Mes Commandes</Text>
-      </View>
-      {loading ? (
-        <ActivityIndicator size="large" color="#4B5563" style={styles.loader} />
-      ) : orders.length === 0 ? (
-        <View style={styles.noOrdersContainer}>
-          <Icon name="package-variant-closed" size={60} color="#D1D5DB" />
-          <Text style={styles.noOrdersText}>Aucune commande en cours</Text>
+    <LinearGradient colors={['#1E3A8A', '#4A90E2']} style={styles.gradient}>
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Mes Commandes</Text>
         </View>
-      ) : (
-        <FlatList
-          data={orders}
-          renderItem={renderOrder}
-          keyExtractor={(item) => item._id}
-          contentContainerStyle={styles.orderList}
-        />
-      )}
-    </View>
+        {loading ? (
+          <ActivityIndicator size="large" color="#4B5563" style={styles.loader} />
+        ) : orders.length === 0 ? (
+          <View style={styles.noOrdersContainer}>
+            <Ionicons name="cart" size={60} color="#D1D5DB" />
+            <Text style={styles.noOrdersText}>Aucune commande en cours</Text>
+          </View>
+        ) : (
+          <FlatList data={orders} renderItem={renderOrder} keyExtractor={(item) => item._id} contentContainerStyle={styles.orderList} />
+        )}
+      </View>
+    </LinearGradient>
   );
-}
+};
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F9FAFB',
-    paddingHorizontal: 16,
-    paddingTop: 50,
-  },
-  header: {
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-    marginBottom: 20,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1E293B',
-    textAlign: 'center',
-    fontFamily: 'Poppins-Bold',
-  },
-  loader: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  orderList: {
-    paddingBottom: 20,
-  },
-  orderCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  orderHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  orderId: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1E293B',
-    fontFamily: 'Poppins-SemiBold',
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-    borderRadius: 16,
-  },
-  statusIcon: {
-    marginRight: 4,
-  },
-  statusText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '500',
-    fontFamily: 'Poppins-Medium',
-  },
-  orderDetails: {
-    marginBottom: 12,
-  },
-  orderText: {
-    fontSize: 14,
-    color: '#4B5563',
-    marginBottom: 8,
-    fontFamily: 'Poppins-Regular',
-  },
-  actionContainer: {
-    marginTop: 12,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    flex: 1,
-    marginHorizontal: 4,
-  },
-  acceptButton: {
-    backgroundColor: '#34D399',
-  },
-  rejectButton: {
-    backgroundColor: '#F87171',
-  },
-  inDeliveryButton: {
-    backgroundColor: '#60A5FA',
-    width: '100%',
-  },
-  deliveredButton: {
-    backgroundColor: '#34D399',
-  },
-  reportButton: {
-    backgroundColor: '#F87171',
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-    fontFamily: 'Poppins-SemiBold',
-    marginLeft: 6,
-  },
-  buttonIcon: {
-    marginRight: 6,
-  },
-  noOrdersContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  noOrdersText: {
-    fontSize: 16,
-    color: '#6B7280',
-    marginTop: 12,
-    fontFamily: 'Poppins-Regular',
-  },
-  mapContainer: {
-    height: 150,
-    marginBottom: 12,
-    borderRadius: 10,
-    overflow: 'hidden',
-  },
-  map: {
-    ...StyleSheet.absoluteFillObject,
-  },
+  gradient: { flex: 1 },
+  container: { flex: 1, paddingHorizontal: 16, paddingTop: 50 },
+  header: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#E5E7EB', marginBottom: 20 },
+  title: { fontSize: 24, fontWeight: '700', color: '#1E293B', textAlign: 'center' },
+  loader: { flex: 1, justifyContent: 'center' },
+  orderList: { paddingBottom: 20 },
+  orderCard: { backgroundColor: '#FFFFFF', borderRadius: 12, padding: 16, marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 4, elevation: 3 },
+  orderHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  orderId: { fontSize: 16, fontWeight: '600', color: '#1E293B' },
+  statusBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 16 },
+  statusText: { color: '#fff', fontSize: 12, fontWeight: '500' },
+  orderDetails: { marginBottom: 12 },
+  orderText: { fontSize: 14, color: '#4B5563', marginBottom: 8 },
+  actionContainer: { marginTop: 12 },
+  actionRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  actionButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8, flex: 1, marginHorizontal: 4 },
+  acceptButton: { backgroundColor: '#34D399' },
+  rejectButton: { backgroundColor: '#F87171' },
+  inDeliveryButton: { backgroundColor: '#60A5FA', width: '100%' },
+  deliveredButton: { backgroundColor: '#34D399' },
+  reportButton: { backgroundColor: '#F87171' },
+  buttonText: { color: '#fff', fontSize: 14, fontWeight: '600', marginLeft: 6 },
+  noOrdersContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  noOrdersText: { fontSize: 16, color: '#6B7280', marginTop: 12 },
+  mapContainer: { height: 150, marginBottom: 12, borderRadius: 10, overflow: 'hidden' },
+  map: { ...StyleSheet.absoluteFillObject },
 });
