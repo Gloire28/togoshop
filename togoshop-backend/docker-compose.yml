@@ -1,0 +1,40 @@
+services:
+  backend:
+    build: .
+    container_name: togoshop-backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - PORT=5000
+      - MONGODB_URI=${MONGODB_URI}
+      - JWT_SECRET=${JWT_SECRET}
+      - BACKBLAZE_KEY_ID=${BACKBLAZE_KEY_ID}
+      - BACKBLAZE_APPLICATION_KEY=${BACKBLAZE_APPLICATION_KEY}
+      - BACKBLAZE_BUCKET_NAME=${BACKBLAZE_BUCKET_NAME}
+      - BACKBLAZE_REGION=${BACKBLAZE_REGION}
+      - BACKBLAZE_ENDPOINT=${BACKBLAZE_ENDPOINT}
+      - BACKBLAZE_BUCKET_ID=${BACKBLAZE_BUCKET_ID}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - redis
+    networks:
+      - togoshop-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: togoshop-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - togoshop-net
+
+networks:
+  togoshop-net:
+    driver: bridge
+
+volumes:
+  redis-data:
