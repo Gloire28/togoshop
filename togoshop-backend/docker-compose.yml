@@ -4,7 +4,7 @@ services:
     container_name: togoshop-backend
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "5847:5000"
     environment:
       - NODE_ENV=production
       - PORT=5000
