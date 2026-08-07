@@ -96,12 +96,6 @@ exports.getProductsBySupermarket = async (req, res) => {
     const { locationId, category } = req.query;
 
     console.log('SupermarketId reçu:', supermarketId);
-    console.log('Query params:', { locationId, category });
-
-    if (!mongoose.Types.ObjectId.isValid(supermarketId)) {
-      console.log('Erreur: ID du supermarché invalide');
-      return res.status(400).json({ message: 'ID du supermarché invalide' });
-    }
 
     const supermarket = await Supermarket.findById(supermarketId);
     if (!supermarket) {
@@ -203,10 +197,6 @@ exports.getProductById = async (req, res) => {
 exports.getSubstitutes = async (req, res) => {
   try {
     const { category, supermarketId, locationId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(supermarketId)) {
-      return res.status(400).json({ message: 'ID du supermarché invalide' });
-    }
 
     const supermarket = await Supermarket.findById(supermarketId, 'status');
     if (!supermarket) {

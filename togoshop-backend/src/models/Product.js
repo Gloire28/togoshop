@@ -20,7 +20,7 @@ const productSchema = new mongoose.Schema({
     enum: ['Fruits', 'Légumes', 'Vêtements', 'Électronique', 'Viandes', 'Produits Laitiers', 'Épicerie', 'Boissons', 'Autres', 'Céréales'],
   },
   supermarketId: {
-    type: mongoose.Schema.Types.ObjectId,
+    type: String,
     required: true,
     ref: 'Supermarket'
   },
@@ -39,7 +39,7 @@ const productSchema = new mongoose.Schema({
       min: [0, 'Le stock ne peut pas être négatif']
     },
     _id: {
-      type: mongoose.Schema.Types.ObjectId,
+      type: String,
       default: () => new mongoose.Types.ObjectId()
     }
   }],
