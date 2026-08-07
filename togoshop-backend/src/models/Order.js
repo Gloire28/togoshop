@@ -39,7 +39,7 @@ const orderSchema = new mongoose.Schema({
     required: true,
   },
   supermarketId: {
-    type: mongoose.Schema.Types.ObjectId,
+    type: String,
     ref: 'Supermarket',
     required: false,
   },
