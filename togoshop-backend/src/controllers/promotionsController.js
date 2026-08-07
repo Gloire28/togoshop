@@ -231,9 +231,6 @@ exports.getActivePromotions = async (req, res) => {
 exports.getPromotionsBySupermarket = async (req, res) => {
   try {
     const { supermarketId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(supermarketId)) {
-      return res.status(400).json({ message: 'ID du supermarché invalide' });
-    }
 
     const now = new Date();
     const promotions = await Promotion.find({
