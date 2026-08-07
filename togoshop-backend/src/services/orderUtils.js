@@ -21,7 +21,6 @@ const validateStock = async (products, supermarketId, locationId, deliveryType, 
   try {
     // Validation des paramètres d'entrée
     if (!Array.isArray(products)) throw new Error('Liste de produits invalide');
-    if (supermarketId && !mongoose.Types.ObjectId.isValid(supermarketId)) throw new Error('ID de supermarché invalide');
     if (locationId && (typeof locationId !== 'string' || locationId.trim() === '')) 
       throw new Error('ID de localisation invalide');
     if (reductionAmount < 0) throw new Error('Le montant de réduction ne peut pas être négatif');
