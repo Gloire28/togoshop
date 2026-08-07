@@ -107,6 +107,31 @@ export default function OrderScreen() {
     }
   };
 
+  const handleValidateAndAssign = async (currentOrder) => {
+    try {
+      if (currentOrder.status === 'awaiting_validator') {
+        const response = await apiRequest(`/orders/${currentOrder._id}/status`, {
+          method: 'PUT',
+          body: { status: 'pending_validation' },
+        });
+        Alert.alert('Succès', response.message);
+      } else {
+        await apiRequest(`/orders/${currentOrder._id}/status`, {
+          method: 'PUT',
+          body: { status: 'validated' },
+        });
+        await apiRequest(`/orders/${currentOrder._id}/status`, {
+          method: 'PUT',
+          body: { status: 'ready_for_pickup' },
+        });
+        Alert.alert('Succès', 'Commande validée et transmise au livreur');
+      }
+      fetchOrders();
+    } catch (error) {
+      Alert.alert('Erreur', error.message || 'Impossible de mettre à jour le statut');
+    }
+  };
+
   const renderProduct = ({ item, orderId }) => {
     const isChecked = checkedProducts[orderId]?.[item._id] || false;
     const imageUrl = item.productId?.imageUrl || 'https://via.placeholder.com/150';
@@ -165,7 +190,7 @@ export default function OrderScreen() {
         <View style={styles.actionsContainer}>
           <TouchableOpacity
             style={[styles.actionButton, { backgroundColor: allChecked ? '#28a745' : '#a3d3a3' }]}
-            onPress={() => updateOrderStatus(currentOrder._id, currentOrder.status === 'awaiting_validator' ? 'pending_validation' : 'validated')}
+            onPress={() => handleValidateAndAssign(currentOrder)}
             disabled={!allChecked}
           >
             <Text style={styles.actionButtonText}>Valider</Text>

@@ -35,7 +35,7 @@ export default function OrderHistoryScreen() {
       const response = await getManagerOrders();
       // Filtrer les commandes terminées ou en cours de livraison
       const filteredOrders = (response.orders || []).filter(order =>
-        ['ready_for_delivery', 'in_delivery', 'delivered', 'cancelled'].includes(order.status)
+        ['ready_for_pickup', 'in_delivery', 'delivered', 'cancelled'].includes(order.status)
       );
       setOrders(filteredOrders);
     } catch (error) {
@@ -88,7 +88,7 @@ export default function OrderHistoryScreen() {
   const getStatusColor = (status) => {
     switch (status) {
       case 'validated': return '#28a745';
-      case 'ready_for_delivery': return '#3498db';
+      case 'ready_for_pickup': return '#3498db';
       case 'in_delivery': return '#e67e22';
       case 'delivered': return '#2ecc71';
       case 'cancelled': return '#dc3545';
