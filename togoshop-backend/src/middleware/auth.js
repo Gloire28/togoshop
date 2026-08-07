@@ -246,14 +246,14 @@ const getActionDescription = (method, baseUrl, path) => {
   }
   if (baseUrl === '/api/orders') {
     if (path === 'manager' && method === 'GET') return 'Récupération des commandes du manager';
-    if (path.match(/^supermarket\/[0-9a-fA-F]{24}\/pending$/) && method === 'GET') return 'Récupération des commandes en attente du supermarché';
-    if (path.match(/^[0-9a-fA-F]{24}\/submit$/) && method === 'PUT') return 'Soumission d\'une commande';
-    if (path.match(/^[0-9a-fA-F]{24}\/validate-delivery$/) && method === 'POST') return 'Validation de la livraison d\'une commande par le client';
-    if (path.match(/^[0-9a-fA-F]{24}\/validate-delivery-driver$/) && method === 'POST') return 'Validation de la livraison d\'une commande par le livreur';
-    if (path.match(/^[0-9a-fA-F]{24}\/resend-validation-code$/) && method === 'POST') return 'Renvoi du code de validation pour une commande';
-    if (path.match(/^[0-9a-fA-F]{24}$/) && method === 'GET') return 'Récupération des détails d\'une commande';
-    if (path.match(/^[0-9a-fA-F]{24}$/) && method === 'PUT') return 'Mise à jour d\'une commande';
-    if (path.match(/^[0-9a-fA-F]{24}\/status$/) && method === 'PUT') return 'Mise à jour du statut d\'une commande';
+    if (path.match(/^supermarket\/[^/]+\/pending$/) && method === 'GET') return 'Récupération des commandes en attente du supermarché';
+    if (path.match(/^[^/]+\/submit$/) && method === 'PUT') return 'Soumission d\'une commande';
+    if (path.match(/^[^/]+\/validate-delivery$/) && method === 'POST') return 'Validation de la livraison d\'une commande par le client';
+    if (path.match(/^[^/]+\/validate-delivery-driver$/) && method === 'POST') return 'Validation de la livraison d\'une commande par le livreur';
+    if (path.match(/^[^/]+\/resend-validation-code$/) && method === 'POST') return 'Renvoi du code de validation pour une commande';
+    if (path.match(/^[^/]+$/) && method === 'GET') return 'Récupération des détails d\'une commande';
+    if (path.match(/^[^/]+$/) && method === 'PUT') return 'Mise à jour d\'une commande';
+    if (path.match(/^[^/]+\/status$/) && method === 'PUT') return 'Mise à jour du statut d\'une commande';
     if (method === 'POST' && path === '') return 'Création d\'une nouvelle commande';
     if (path === 'user/me' && method === 'GET') return 'Récupération des commandes de l\'utilisateur';
     if (path === 'user/history' && method === 'GET') return 'Récupération de l\'historique des commandes';
@@ -262,11 +262,11 @@ const getActionDescription = (method, baseUrl, path) => {
     if (path === 'driver/me' && method === 'GET') return 'Récupération des commandes du livreur';
   }
   if (baseUrl === '/api/products') {
-    if (path.match(/^[0-9a-fA-F]{24}$/) && method === 'GET') return 'Récupération des détails d\'un produit';
-    if (path.match(/^supermarket\/[0-9a-fA-F]{24}$/) && method === 'GET') return 'Récupération des produits d\'un supermarché';
-    if (path.match(/^[0-9a-fA-F]{24}$/) && method === 'PUT') return 'Mise à jour d\'un produit';
+    if (path.match(/^[^/]+$/) && method === 'GET') return 'Récupération des détails d\'un produit';
+    if (path.match(/^supermarket\/[^/]+$/) && method === 'GET') return 'Récupération des produits d\'un supermarché';
+    if (path.match(/^[^/]+$/) && method === 'PUT') return 'Mise à jour d\'un produit';
     if (method === 'POST') return 'Création d\'un nouveau produit';
-    if (path.match(/^[0-9a-fA-F]{24}$/) && method === 'DELETE') return 'Suppression d\'un produit';
+    if (path.match(/^[^/]+$/) && method === 'DELETE') return 'Suppression d\'un produit';
   }
   if (baseUrl === '/api/auth') {
     if (path === 'login' && method === 'POST') return 'Connexion de l\'utilisateur';
@@ -276,7 +276,7 @@ const getActionDescription = (method, baseUrl, path) => {
     if (path === 'me' && method === 'GET') return 'Récupération des informations du livreur';
     if (path === 'location' && method === 'PUT') return 'Mise à jour de la position du livreur';
     if (path === 'discoverable' && method === 'PUT') return 'Mise à jour de la visibilité du livreur';
-    if (path.match(/^[0-9a-fA-F]{24}\/location$/) && method === 'GET') return 'Récupération de la position d\'un livreur';
+    if (path.match(/^[^/]+\/location$/) && method === 'GET') return 'Récupération de la position d\'un livreur';
     if (path === 'orders/accept' && method === 'POST') return 'Acceptation d\'une commande par le livreur';
     if (path === 'orders/reject' && method === 'POST') return 'Rejet d\'une commande par le livreur';
     if (path === 'orders/status' && method === 'PUT') return 'Mise à jour du statut d\'une commande par le livreur';
@@ -290,20 +290,20 @@ const getActionDescription = (method, baseUrl, path) => {
   }
   if (baseUrl === '/api/promotions') {
     if (path === '' && method === 'GET') return 'Récupération des promotions';
-    if (path.match(/^supermarket\/[0-9a-fA-F]{24}$/) && method === 'GET') return 'Récupération des promotions d\'un supermarché';
+    if (path.match(/^supermarket\/[^/]+$/) && method === 'GET') return 'Récupération des promotions d\'un supermarché';
     if (path === '' && method === 'POST') return 'Création d\'une nouvelle promotion';
   }
   if (baseUrl === '/api/users' && path === 'me' && method === 'GET') return 'Récupération des informations de l\'utilisateur';
   if (baseUrl === '/api/supermarkets') {
-    if (path.match(/^[0-9a-fA-F]{24}\/toggle-status$/) && method === 'PATCH') return 'Basculement de l\'état du supermarché';
-    if (path.match(/^[0-9a-fA-F]{24}\/status$/) && method === 'GET') return 'Récupération de l\'état du supermarché';
-    if (path.match(/^[0-9a-fA-F]{24}$/) && method === 'GET') return 'Récupération des détails d\'un supermarché';
+    if (path.match(/^[^/]+\/toggle-status$/) && method === 'PATCH') return 'Basculement de l\'état du supermarché';
+    if (path.match(/^[^/]+\/status$/) && method === 'GET') return 'Récupération de l\'état du supermarché';
+    if (path.match(/^[^/]+$/) && method === 'GET') return 'Récupération des détails d\'un supermarché';
   }
   if (baseUrl === '/api/notifications') {
   if (path === 'subscribe' && method === 'POST') return 'Abonnement à une notification';
   if (path === '' && method === 'GET') return 'Récupération des notifications';
-  if (path.match(/^[0-9a-fA-F]{24}\/read$/) && method === 'PATCH') return 'Marquer une notification comme lue';
-  if (path.match(/^[0-9a-fA-F]{24}$/) && method === 'DELETE') return 'Suppression d\'une notification';
+  if (path.match(/^[^/]+\/read$/) && method === 'PATCH') return 'Marquer une notification comme lue';
+  if (path.match(/^[^/]+$/) && method === 'DELETE') return 'Suppression d\'une notification';
   if (method === 'POST' && path === '') return 'Création d\'une notification (admin)';
   }
   return 'Action inconnue';
@@ -425,11 +425,9 @@ module.exports = async (req, res, next) => {
       if (permissionSegments.length === requestSegments.length) {
         pathMatch = permissionSegments.every((segment, index) => {
           if (segment.startsWith(':')) {
-            // Segment dynamique (ex. :id) : vérifier que le segment de la requête est valide (ex. ObjectId pour :id)
-            if (segment === ':id' || segment === ':supermarketId') {
-              return /^[0-9a-fA-F]{24}$/.test(requestSegments[index]);
-            }
-            return true;
+            // Segment dynamique (ex. :id, :supermarketId) : accepter tout identifiant non vide
+            // (compatible avec les ObjectId Mongo ET les IDs custom en string comme "supermarket-001")
+            return requestSegments[index] && requestSegments[index].length > 0;
           }
           return segment === requestSegments[index];
         });
